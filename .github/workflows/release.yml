@@ -42,8 +42,12 @@ jobs:
       - name: Build (universal, ad-hoc signed)
         run: |
           set -euo pipefail
-          # 无证书环境用 ad-hoc 签名 + hardened runtime；发布说明里写明
-          # 首次启动需右键打开或 xattr 去隔离。配好 Developer ID 证书后可加公证。
+          # 无证书环境用 ad-hoc 签名；发布说明里写明首次启动需右键打开或 xattr
+          # 去隔离。配好 Developer ID 证书后可加公证（那时再开 hardened runtime）。
+          # 刻意 ENABLE_HARDENED_RUNTIME=NO：实测 hardened runtime 下（继承给
+          # node 子进程）从外置卷加载 dylib 会被沙盒 EPERM 拦截
+          # （dyld: file system sandbox blocked open，libnode 起不来），
+          # 而未公证分发本来就用不上它的任何好处。
           xcodebuild \
             -project DshDock.xcodeproj \
             -scheme DshDock \
@@ -52,6 +56,7 @@ jobs:
             -derivedDataPath build \
             ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO \
             CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="-" DEVELOPMENT_TEAM= \
+            ENABLE_HARDENED_RUNTIME=NO \
             build
 
       - name: Stamp version into app bundle
