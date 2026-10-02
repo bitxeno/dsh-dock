@@ -12,7 +12,11 @@
 
 - `Swift + AppKit + WKWebView`，全代码无 Storyboard，`@main AppDelegate`。
 - BundleID：`com.xenori.dshdock`，App 名 `DshDock`，最低 `macOS 15.0`。
-- 工程：`xcodegen` 生成 `DshDock.xcodeproj`（`project.yml` 为源），源码在 `Sources/`，无 `Resources/` 必需资源（图标后加）。
+- 工程：`xcodegen` 生成 `DshDock.xcodeproj`（`project.yml` 为源），源码在 `Sources/`。
+  App 图标在 `Sources/Assets.xcassets` 的 `AppIcon.appiconset`（10 尺寸齐全），
+  xcodegen 扫 `Sources/` 自动收进 Resources phase 并注入
+  `CFBundleIconName/CFBundleIconFile = AppIcon`——在 Xcode 里改工程设置会被
+  下次 generate 冲掉，资源放 catalog、设置改动回落 `project.yml`。
 - 分发：Developer ID + 公证，不开 Sandbox（`com.apple.security.app-sandbox = false`）。若日后上架 MAS，托管 `Process` 方案需重做，此处记为 tech-debt。
 
 ## 3. 启动命令模型（Q3/Q8/Q13/Q21 闭环）
@@ -58,7 +62,10 @@
 - 启动前先 TCP 预检 `127.0.0.1:<port>`：若已占用 → 直接 Error 页（“端口被占” + `[改端口]` `[重试]`）。
 - 拉起后等 stdout 出现 `dsh web: http://127.0.0.1:<port>/?token=…`（token 每次启动都变），
   解析出 token URL 并每 200ms 探活：2xx/3xx 算就绪（实测 token URL 返回 303），401 不算。
-  10s 超时；期间原生 loading 视图：“正在启动 dsh… + log 尾部 + [取消]”。
+  10s 超时；期间原生 loading 页像素级对齐 dsh web 自带 loading（从其前端 bundle
+  实测 CSS：logo 16pt semibold + 字间距 .08em，spinner 20px/2px 环/72° 弧/0.8s 一圈，
+  提示语 12pt，纵列间距 16pt；颜色用语义色适配深色），logo 换 `DSH-DOCK`，
+  下方提示语轮播（2.4s 一换，无取消按钮）。
 - WebView 加载的必须是 token URL，裸 `/` 只会 401（`dsh web authentication required`）。
   token URL 实测返回 303 并 `Set-Cookie: dsh-auth-*`（HttpOnly），跟随相对重定向 `./`
   后携带 cookie 即 200 —— 因此 WebView 必须用 persistent DataStore（§9-A），换 ephemeral
@@ -70,11 +77,21 @@
 
 | 场景 | 页面 | 内容 | 操作 |
 |---|---|---|---|
-| 端口被占 | Error | 占用提示 + 尝试的 URL | 重试 / 打开设置 / 显示日志 |
-| dsh 秒退 exit!=0 | Error | exitCode + 最后 100 行 log | 重试 / 打开设置 / 复制诊断命令 |
-| 启动超时 10s | Error | 超时 + log 尾 | 同上 |
-| dsh/npx 全缺失 | Missing | 已搜路径 + provider | 打开设置 / 复制诊断命令 + `npm install -g @deepseek-ai/dsh@latest` 提示 |
+| 端口被占 | Error | 占用提示 + 占用进程（lsof 异步补充）+ log 尾 | **强制结束并重启**（SIGKILL 占用进程 → 500ms 等释放 → 常规重启）；**无重试按钮** |
+| dsh 秒退 exit!=0 | Error | exitCode + 最后 100 行 log | 重试 |
+| 启动超时 10s | Error | 超时 + log 尾 | 重试 |
+| dsh/npx 全缺失 | Missing | 已搜路径 + provider + `npm install -g @deepseek-ai/dsh@latest` 提示 | 重试 |
 
+- 错误页 = `StatusViewController`，布局参考 Chrome 断网页：全页浅底 + 左对齐内容列
+  （灰色警示图形 + 24pt 大标题 + 灰色说明），左下主按钮组（自绘纯色圆角，
+  与设置页主按钮同款），右缘"详情"链接——展开日志块（最近 200 行 +
+  "打开日志文件" = `NSWorkspace.open(LogStore.fileURL)`）。"打开设置/复制诊断命令"
+  已移除——设置走标题栏齿轮，诊断命令常驻服务日志（`$ …` 行）。
+- "强制结束并重启" = `DshService.forceKillPortOccupants`：`/usr/sbin/lsof -Fpc`
+  绝对路径（GUI PATH 残缺）查 LISTEN 进程 → 逐个 SIGKILL（可能多个，SO_REUSEPORT）。
+- 错误页"详情"读 `LogStore` 环 buffer（每次 `start()` 先清空重写）——所以 `start()`
+  所有可能 throw 的路径之前必须先落日志：启动头 + `$ 命令` 行在 TCP 预检之前写，
+  二进制解析失败写"已搜索"清单，预检失败写失败行。否则详情永远空白（实测踩过）。
 - WebView 的 `ERR_CONNECTION_REFUSED` 不直接暴露，统一收敛到原生页。
 
 ## 8. 标题栏按钮与设置交互
@@ -86,12 +103,35 @@
   （`NSStackView` 在这里会被压成 0 宽导致按钮不可见），总高不得超过 28pt；
   窗口需 `fullSizeContentView` + 透明标题栏，WebView 顶部按 `contentLayoutRect`
   算出的标题栏高度避让（算不出回退 28）。
-- 按钮：SF Symbols `arrow.clockwise`（重启）+ `gearshape`（设置），30x24 无边框，
+- 按钮：SF Symbols `arrow.clockwise`（重启）+ `hand.raised`/`hand.raised.slash`
+  （插件重启接管开关，图标随状态切换）+ `gearshape`（设置），30x24 无边框，
   tooltip + accessibilityLabel 中文。重启中按钮换菊花（`setRestartingUI`），
-  两按钮同时禁用；`starting/stopping` 状态下忽略再次点击。常显，不做自动隐藏
+  重启/设置在 `starting/stopping` 状态下忽略再次点击。常显，不做自动隐藏
   （chrome 本来就一直在）。
-- 设置：点齿轮以按钮为锚点弹 `NSPopover`（transient），字段 `Binary Path` + `Extra Args` +
-  `Port(1-65535)` + 当前 provider 只读行 + `[应用并重启]` `[取消]`。
+- 接管开关弹层（`InterceptToggleViewController`，对齐菜单栏弹层参考稿）：
+  标题 + `NSSwitch` 靠右 + 灰色说明，点外关闭。偏好存
+  `AppPreferences.interceptPluginRestart`（UserDefaults `app.interceptPluginRestart`，
+  默认开，见 §11）。切换即时生效：user scripts 全量重建（对之后的页面加载生效）
+  + `evaluateJavaScript` 同步当前页的 `__dshDockInterceptEnabled` 标记（钩子在
+  fetch 时读标记，已包装的页面关掉后也放行真实请求）；按钮图标随状态切换。
+  说明文字多行折行需要 `cell.wraps + preferredMaxLayoutWidth`，只给宽约束
+  autolayout 始终按单行测高（实测）。
+- 设置：点齿轮以按钮为锚点弹 `NSPopover`（transient，点外关闭，无取消按钮），
+  竖屏布局对齐 dsh 桌面端设置窗口（内容宽 300pt 的窄长卡片）：terminal 图标头
+  （dsh/服务设置/描述）+ 三行（每行图标 + 标题/副标题在上，输入框独占一行在下，
+  图标字形 18pt（frame 仍 24 宽，保住缩进 34pt 对齐）且顶部与标题顶对齐
+  （`labelRow.alignment = .top`）；
+  输入框左缘与标题文字对齐（缩进 34pt = 图标 24 + 间距 10），右缘到内容右边；
+  Binary 纯输入框无"打开文件"按钮，Port 的 stepper 内嵌输入框右缘；
+  副标题按实际功能不照抄参考稿：Binary Path = 输入提示 + 第二行
+  "当前生效：<provider>"（供给链解析结果，npx/自定义形态区分于此，
+  与输入框内容在"改了未应用"时允许不一致；副标题 maxNumberOfLines=3
+  容 npx 折行），Port = "dsh web 服务监听端口，应用后生效"）
+  + 分割线 + 右下 `[应用并重启]`（118x38 自绘：
+  蓝底 layer 圆角 8pt + 白字居中——系统 `.rounded` bezel 在此高度是胶囊形，
+  与参考稿不符；用低 hugging spacer 顶到右缘）。输入框用 `roundedBezel`、
+  高 32pt（默认方边框与参考稿不符）；内容根视图必须设不透明底
+  （`textBackgroundColor`）——popover 默认半透明，会被背后深色网页染灰（实测）。
   改完不自动生效，必须点应用；应用时做校验（二进制可执行性、端口范围），非法则行内报错不关闭。
 
 ## 9. WebView 策略（Q12/Q17）
@@ -100,12 +140,26 @@
 - ATS：`NSAllowsLocalNetworking = YES`（`http://127.0.0.1` 本地明文）。
 - 导航：`127.0.0.1/localhost` 留在 WebView；外部 `https` 扔默认浏览器；新窗口/下载扔出去；支持 `Cmd+R` 刷新。V1 无地址栏。
 - 配置变更（端口/provider 切换）后清空与否：V1 不清空，由用户手动刷新；换端口即新 origin，天然隔离。
+- 插件重启接管（dsh-market "立即重启"）：客户端用 `fetch POST …/dsh-market/restart`
+  （202 `{ok:true}` 后轮询 bootId 变化再 `location.reload()`）。注入 `WKUserScript`
+  fetch 钩子命中即 postMessage 给原生并回合成 202，**真请求不出网**——dsh 自己的
+  detached 重启助手不会运行（否则会出现 App 管不到的接管进程，后续设置重启必撞
+  端口占用）；原生走常规 `service.restart`（SIGTERM 优雅退出 → 新 token）。
+  reload 携带的旧 token 在 `decidePolicyFor` 里纠正为当前 token URL（token 每次启动
+  都变，放行必 401 白页）。行为测试覆盖：真实调用形态/v1 别名/放行/带查询参数/防重复注入。
+  已知边界：dsh-market 的 recovery-apply 流程也会重启宿主，未拦截（会走 detached
+  助手 → App 显示意外退出页，用"重试"或"强制结束并重启"可恢复）。
 
 ## 10. 窗口与生命周期
 
 - 单实例单 dsh。启动即自动起 dsh；红灯（关闭按钮）= 隐藏窗口（`orderOut`），
   dsh 服务继续跑；点 Dock 图标经 `applicationShouldHandleReopen` 重新打开；
   `Cmd+Q` = 退 App + 杀子进程（唯一退出路径）。
+- 单例运行在 `main.swift` 最顶部（先于任何服务启动）拦：按 bundleID 查
+  `NSRunningApplication`，命中已有实例 → 发分布式通知 `com.xenori.dshdock.reopen`
+  （已运行实例监听后 `showMainWindow` 复活红灯隐藏的窗口）+ 尽力 `activate()`
+  → 本进程 `exit(0)`，不会拉起第二个 dsh/抢端口。实测：直接双击二进制
+  重复启动时第二实例 exit 0、第一实例存活。
 - `applicationShouldTerminateAfterLastWindowClosed` 必须 `false`：
   为 `true` 时 `orderOut` 最后一个窗口会连带退出 App（实测：hide 后 27ms 进了 terminate）。
 - 窗口 frame autosave（`NSWindow.FrameAutosaveName`），最小 `900×600`，Dock 有图标，支持全屏/分屏。
@@ -113,6 +167,8 @@
 ## 11. 设置持久化
 
 - `UserDefaults`（suite 默认）：`dsh.binaryPath: String = "dsh"`，`dsh.extraArgs: String = ""`，`dsh.port: Int = 38811`。键名稳定，V2 加 `workingDirectory/env` 不迁移。
+- App 级偏好（`AppPreferences`，与 dsh 启动三元组分键、不进设置表单）：
+  `app.interceptPluginRestart: Bool = true`（插件"立即重启"由 App 接管，见 §9/§8）。
 - 校验：port 越界、二进制不可执行（`isExecutableFile`）在 Apply 时拦截。
 
 ## 12. 源码结构（实施约）
@@ -120,14 +176,16 @@
 ```
 project.yml                 # xcodegen 源
 Sources/
-  main.swift                # 显式入口（@main 在无 MainMenu nib 时挂不上 delegate，用 main.swift 手动 run）
-  AppDelegate.swift         # @main 已移除，由 main.swift 挂载；生命周期，Quit 时同步杀子进程
+  main.swift                # 显式入口 + 单例守卫（重复启动→通知已有实例弹窗后退出），@main 在无 MainMenu nib 时挂不上 delegate，用 main.swift 手动 run
+  AppDelegate.swift         # @main 已移除，由 main.swift 挂载；生命周期，Quit 时同步杀子进程；监听第二实例 reopen 通知
+  Assets.xcassets           # AppIcon.appiconset（DeepSeek 鲸鱼定制图，10 尺寸）
   DshConfig.swift           # UserDefaults 模型 + 默认值 + 校验
   ShellSplit.swift          # shell-like 切分 + strip 端口参数 + shell-escape
   BinaryResolver.swift      # login-shell which + 固定路径 + npx 解析，返回 provider
   LogStore.swift            # 文件轮转 + 环 buffer
   DshService.swift          # Process 管家 + TCP 预检 + 就绪轮询 + restart
-  MainWindowController.swift# NSWindow + WKWebView + 标题栏 NSToolbar（右侧重启/设置）+ loading/error/missing 视图
+  MainWindowController.swift# NSWindow + WKWebView + 标题栏 accessory + loading 视图（错误/状态页在 StatusViewController）
+  StatusViewController.swift # 错误/状态页（Chrome 断网页式全页布局）：详情展开日志 + 打开日志文件；重试 / 端口占用时强制结束并重启
   SettingsViewController.swift # popover 表单 + 校验 + Apply&Restart
 Info.plist                  # NSAllowsLocalNetworking 等
 DshDock.entitlements        # 非沙盒

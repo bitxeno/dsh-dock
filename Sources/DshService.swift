@@ -18,6 +18,13 @@ enum DshLaunchError: LocalizedError {
     }
 }
 
+/// 端口占用者（lsof 解析结果），错误页展示 + 强杀定位用。
+struct PortOccupant {
+    let pid: pid_t
+    let name: String
+    var description: String { "\(name) (pid \(pid))" }
+}
+
 /// 托管 dsh 子进程：启动/停止/重启 + 就绪轮询 + 日志。
 /// Swift 5 模式：状态回调一律派到主线程。
 final class DshService: NSObject {
@@ -126,7 +133,11 @@ final class DshService: NSObject {
         // 1) 解析二进制
         let (launch, searched) = BinaryResolver.resolve(configuredBinary: config.binaryPath)
         guard let launch = launch else {
-            // 区分自定义无效 vs 全缺失
+            // 区分自定义无效 vs 全缺失；错误页"详情"读环 buffer，这里必须先落日志
+            log.header("二进制解析失败")
+            if !searched.isEmpty {
+                log.append("已搜索：\n" + searched.map { "  \($0)" }.joined(separator: "\n"))
+            }
             let trimmed = config.binaryPath.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed != DshConfig.defaultBinary && !trimmed.isEmpty {
                 setState(.idle)
@@ -143,13 +154,24 @@ final class DshService: NSObject {
         currentCleanedExtra = cleaned
         strippedArgs = stripped
 
-        // 3) TCP 预检端口
+        // 3) 先把本次启动的命令写进日志（必须在 TCP 预检之前——错误页"详情"读的就是
+        //    这份环 buffer，不留一行就永远是空的，实测踩过）。
+        log.header("启动 \(launch.displayName)")
+        let diag: [String] = [launch.executableURL.path] + launch.prefixArgs
+            + ["web", "--no-open", "--port", String(config.port)] + cleaned
+        log.append("$ " + shellJoin(diag))
+        if !stripped.isEmpty {
+            log.append("提示：已忽略命令中的自带参数（以端口字段为准）：\(stripped.joined(separator: " "))")
+        }
+
+        // 4) TCP 预检端口
         if tcpConnectSucceeds(port: config.port) {
+            log.append("TCP 预检失败：127.0.0.1:\(config.port) 已被其他进程监听")
             setState(.idle)
             throw DshLaunchError.portOccupied(config.port)
         }
 
-        // 4) 组装 Process
+        // 5) 组装 Process
         let proc = Process()
         proc.executableURL = launch.executableURL
         proc.arguments = launch.prefixArgs + ["web", "--no-open", "--port", String(config.port)] + cleaned
@@ -192,14 +214,6 @@ final class DshService: NSObject {
                     self.onUnexpectedExit?(code)
                 }
             }
-        }
-
-        log.header("启动 \(launch.displayName)")
-        let diag: [String] = [launch.executableURL.path] + launch.prefixArgs
-            + ["web", "--no-open", "--port", String(config.port)] + cleaned
-        log.append("$ " + shellJoin(diag))
-        if !stripped.isEmpty {
-            log.append("提示：已忽略命令中的自带参数（以端口字段为准）：\(stripped.joined(separator: " "))")
         }
 
         do {
@@ -298,6 +312,56 @@ final class DshService: NSObject {
             kill(p.processIdentifier, SIGKILL)
         }
         process = nil
+    }
+
+    // MARK: - 端口占用（错误页"强制结束并重启"用）
+
+    /// 查询 LISTEN 在指定 TCP 端口的进程。走 /usr/sbin/lsof 绝对路径（GUI PATH 残缺），
+    /// -F 模式免表头解析；可能同时有多个监听者（SO_REUSEPORT）。
+    func portOccupants(port: Int) -> [PortOccupant] {
+        let out = runTool("/usr/sbin/lsof", ["-nP", "-iTCP:\(port)", "-sTCP:LISTEN", "-Fpc"])
+        var result: [PortOccupant] = []
+        var pid: pid_t?
+        var name = ""
+        func flush() {
+            if let pid { result.append(PortOccupant(pid: pid, name: name.isEmpty ? "?" : name)) }
+            pid = nil
+            name = ""
+        }
+        for line in out.split(separator: "\n", omittingEmptySubsequences: true) {
+            if line.hasPrefix("p"), let p = pid_t(line.dropFirst()) {
+                flush()
+                pid = p
+            } else if line.hasPrefix("c") {
+                name = String(line.dropFirst())
+            }
+        }
+        flush()
+        return result
+    }
+
+    /// SIGKILL 掉 LISTEN 在指定端口的所有进程，返回被杀列表（写进服务日志备查）。
+    @discardableResult
+    func forceKillPortOccupants(port: Int) -> [PortOccupant] {
+        let victims = portOccupants(port: port)
+        for v in victims {
+            kill(v.pid, SIGKILL)
+            log.append("已强制结束占用端口 \(port) 的进程：\(v.description)")
+        }
+        return victims
+    }
+
+    private func runTool(_ path: String, _ args: [String]) -> String {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: path)
+        p.arguments = args
+        p.standardError = FileHandle.nullDevice
+        let pipe = Pipe()
+        p.standardOutput = pipe
+        do { try p.run() } catch { return "" }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        return String(data: data, encoding: .utf8) ?? ""
     }
 
     // MARK: - 探针
