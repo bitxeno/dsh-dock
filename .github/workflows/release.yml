@@ -128,16 +128,20 @@ jobs:
         if: env.TAP_REPO != '' && env.TAP_TOKEN != ''
         run: |
           set -euo pipefail
-          # HTTPS 认证必须是 用户名:token 成对形式（两次实测踩坑）：
-          # x-access-token:<oauth-token> → Invalid username or token（那是 App token 专用）；
-          # https://<token>@ → push 时 git 交互式索要密码，CI 无终端直接失败。
-          TAP_OWNER="${TAP_REPO%%/*}"
-          git clone "https://${TAP_OWNER}:${TAP_TOKEN}@github.com/${TAP_REPO}.git" tap
-          mkdir -p tap/Casks
-          cp dist/dshdock.rb tap/Casks/dshdock.rb
-          cd tap
-          git config user.name "dsh-dock release bot"
-          git config user.email "actions@users.noreply.github.com"
-          git add Casks/dshdock.rb
-          git diff --cached --quiet || git commit -m "dshdock ${VERSION}"
-          git push
+          # 走 Contents API 而不是 git push：git 凭据对 OAuth token 认证形式挑剔
+          # （x-access-token:/裸 token/username:token 三种形式实测两种被拒），
+          # API 的 Bearer 认证 + 失败时打印原始响应，行为可诊断。
+          API="https://api.github.com/repos/${TAP_REPO}/contents/Casks/dshdock.rb"
+          OLD_SHA=$(curl -sf -H "Authorization: Bearer ${TAP_TOKEN}" "$API" | jq -r '.sha // empty') || true
+          jq -n --arg message "dshdock ${VERSION}" \
+                --arg content "$(base64 -i dist/dshdock.rb)" \
+                --arg sha "$OLD_SHA" \
+                '{message: $message, content: $content}
+                 + (if $sha == "" then {} else {sha: $sha} end)' > payload.json
+          HTTP=$(curl -s -o response.json -w "%{http_code}" \
+            -X PUT -H "Authorization: Bearer ${TAP_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "$API" -d @payload.json)
+          echo "tap update HTTP ${HTTP}"
+          cat response.json | jq -r '.commit.html_url // .message'
+          case "$HTTP" in 200|201) exit 0;; *) exit 1;; esac
