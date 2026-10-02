@@ -44,7 +44,12 @@
 
 - 每次启动打日志：最终解析路径 + 用的哪一级，设置页显示当前 provider（`dsh: /opt/homebrew/bin/dsh` / `npx`）。
 - 全失败 → 原生缺失页（见 §7），不进 WebView。缺失页文案含已搜索路径 + `npm install -g @deepseek-ai/dsh@latest` + `[打开设置]` `[复制诊断命令]`。
-- 工作目录：默认用户 Home，V1 不暴露配置（预留 `workingDirectory` 字段）。环境变量：继承父进程 + 透传解析到的 `PATH`。
+- 工作目录：默认用户 Home，V1 不暴露配置（预留 `workingDirectory` 字段）。环境变量：继承父进程，
+  PATH 多来源合并去重（当前 env + login-shell PATH + 解析出的 dsh 所在目录 +
+  `/opt/homebrew/bin` `/usr/local/bin` + 系统目录）——实测踩坑：brew shellenv 只配在
+  `.zshrc`（交互式）的机器上，Finder 双击下 `zsh -l -c` 的 login PATH 没有
+  `/opt/homebrew/bin`，dsh 能靠固定路径解析到但它脚本的 `#!/usr/bin/env node`
+  起不来（`env: node: No such file or directory`），终端启动因继承完整 PATH 而掩盖。
 
 ## 5. 进程管家（Q4/Q15）
 

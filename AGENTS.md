@@ -38,7 +38,10 @@ xcodebuild -project DshDock.xcodeproj -scheme DshDock -configuration Debug build
    换 ephemeral 会掉 cookie 登录态，表现为 401。
 5. **GUI 的 PATH 是残的**——终端能跑 `dsh` 不代表双击 App 能找到。
    解析必须走 `BinaryResolver.loginShellWhich`（`/bin/zsh -l -c`），别简化成
-   `ProcessInfo.environment["PATH"]` 或写死路径。
+   `ProcessInfo.environment["PATH"]` 或写死路径。**spawn 子进程的 PATH 也要多来源
+   合并**（当前 env + login PATH + dsh 所在目录 + /opt/homebrew/bin 等固定目录）：
+   brew shellenv 只配在 `.zshrc`（交互式）的机器上，login PATH 拿不到 homebrew，
+   dsh 能解析到但它脚本的 `#!/usr/bin/env node` 起不来（实测）。
 6. **`npx` fallback 必须带 `--yes`**——GUI 无 stdin，缺它会假死在安装确认上。
 7. `dsh web` 真实 flags：`--host / --no-open / --port / --trusted-host`
    （无 `-p` 简写；strip 逻辑多删一点无妨，少删会双端口）。改命令拼接前先

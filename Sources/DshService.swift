@@ -176,10 +176,23 @@ final class DshService: NSObject {
         proc.executableURL = launch.executableURL
         proc.arguments = launch.prefixArgs + ["web", "--no-open", "--port", String(config.port)] + cleaned
         proc.currentDirectoryURL = FileManager.default.homeDirectoryForCurrentUser
+        // PATH 多来源合并去重，不依赖单一来源（实测踩坑）：brew shellenv 配在
+        // .zshrc（交互式）而非 .zprofile 的机器上，Finder 双击下 zsh -l -c 拿到的
+        // login PATH 没有 /opt/homebrew/bin——dsh 能靠固定路径解析到，但它脚本的
+        // `#!/usr/bin/env node` 找不到 node，直接起不来。所以把 login PATH、
+        // 当前 env、dsh 所在目录、常用固定目录全部并进来。
         var env = ProcessInfo.processInfo.environment
-        if let lp = BinaryResolver.loginShellPATH(), !lp.isEmpty {
-            env["PATH"] = lp
+        var pathParts = (env["PATH"] ?? "").split(separator: ":").map(String.init)
+        if let lp = BinaryResolver.loginShellPATH() {
+            pathParts += lp.split(separator: ":").map(String.init)
         }
+        pathParts.append(launch.executableURL.deletingLastPathComponent().path)
+        pathParts.append(contentsOf: ["/opt/homebrew/bin", "/usr/local/bin",
+                                      "/usr/bin", "/bin", "/usr/sbin", "/sbin"])
+        var seenPaths = Set<String>()
+        env["PATH"] = pathParts
+            .filter { !$0.isEmpty && seenPaths.insert($0).inserted }
+            .joined(separator: ":")
         proc.environment = env
 
         let out = Pipe()
