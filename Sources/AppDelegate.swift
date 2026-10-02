@@ -1,13 +1,24 @@
 import Cocoa
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// 第二实例通过分布式通知请求复活主窗口（单例守卫，见 main.swift）。
+    static let reopenNotification = Notification.Name("com.xenori.dshdock.reopen")
+
     private var windowController: MainWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        DistributedNotificationCenter.default().addObserver(
+            self, selector: #selector(reopenFromSecondInstance),
+            name: Self.reopenNotification, object: nil)
         setupMenu()
         windowController = MainWindowController()
         windowController?.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @objc private func reopenFromSecondInstance() {
+        NSLog("[DshDock] 收到第二实例 reopen 通知，弹出主窗口")
+        showMainWindow()
     }
 
     /// 必须 false：红灯只是 orderOut 隐藏，若为 true，藏起最后一个窗口会连带退出 App（实测）。
