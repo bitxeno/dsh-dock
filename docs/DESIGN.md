@@ -206,7 +206,10 @@ open ~/Library/Developer/Xcode/DerivedData/.../DshDock.app  # 或 Finder 双击�
 
 - 验证清单：终端能跑但 Finder 双击也能解析 dsh；端口占用页；kill -9 旧进程后重启；缺失 dsh 时 npx fallback；缺失页复制命令去终端可复现；鼠标离开顶部 2s 工具栏消失；设置 Apply 触发重启。
 - 发布：推 `v*` 标签触发 `.github/workflows/release.yml`（也可手动 dispatch）——
-  universal（arm64+x86_64）ad-hoc 签名构建 → PlistBuddy 把版本写进包内 Info.plist
+  universal（arm64+x86_64）ad-hoc 签名构建，版本在构建期经
+  `MARKETING_VERSION`/`CURRENT_PROJECT_VERSION` 注入 Info.plist（签名前定稿，
+  随签名封存；严禁签名后用 PlistBuddy 改包内 Info.plist——破坏签名后 macOS
+  判定为篡改，其子进程被沙盒限制加载外部卷 dylib，实测）
   → hdiutil 打 DMG → SHA256 → 生成 cask（头注释按 `brew style` 要求：typed 在前、
   strict、desc 不含平台名）→ GitHub Release 附 DMG/checksums/cask。可选 secrets
   `HOMEBREW_TAP_REPO`+`HOMEBREW_TAP_TOKEN` 自动把 cask 推到 tap 仓库，用户

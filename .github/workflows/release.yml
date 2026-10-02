@@ -57,20 +57,17 @@ jobs:
             ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO \
             CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="-" DEVELOPMENT_TEAM= \
             ENABLE_HARDENED_RUNTIME=NO \
+            MARKETING_VERSION=$VERSION CURRENT_PROJECT_VERSION=$VERSION \
             build
-
-      - name: Stamp version into app bundle
-        run: |
-          set -euo pipefail
-          APP="build/Build/Products/Release/DshDock.app"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP/Contents/Info.plist"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" "$APP/Contents/Info.plist"
 
       - name: Package DMG
         run: |
           set -euo pipefail
           mkdir -p dist
+          # 版本已在构建期经 MARKETING_VERSION 注入 Info.plist 并随签名封存；
+          # 严禁签名后用 PlistBuddy 改 Info.plist（破坏签名 → 子进程被沙盒拦截，实测）。
           APP="build/Build/Products/Release/DshDock.app"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Contents/Info.plist"
           hdiutil create -volname "DshDock $VERSION" \
             -srcfolder "$APP" -ov -format UDZO \
             "dist/DshDock-$VERSION.dmg"

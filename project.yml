@@ -13,7 +13,11 @@ targets:
       path: Info.plist
       properties:
         CFBundleDisplayName: DshDock
-        CFBundleShortVersionString: 0.1.0
+        # 版本走 build setting（CI 发版时命令行 MARKETING_VERSION=$TAG 注入）。
+        # 不能在签名后用 PlistBuddy 改包内 Info.plist——破坏代码签名，被 macOS
+        # 判定为篡改后其子进程被沙盒限制（实测：node 的 dylib 加载被拒）。
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(MARKETING_VERSION)
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
     entitlements:
@@ -23,6 +27,7 @@ targets:
         SWIFT_VERSION: "5.0"
         MACOSX_DEPLOYMENT_TARGET: "15.0"
         PRODUCT_BUNDLE_IDENTIFIER: com.xenori.dshdock
+        MARKETING_VERSION: "0.1.0"
         PRODUCT_NAME: DshDock
         ENABLE_HARDENED_RUNTIME: YES
         CODE_SIGN_STYLE: Automatic
