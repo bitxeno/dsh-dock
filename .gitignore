@@ -1,0 +1,6 @@
+# macOS
+.DS_Store
+
+# xcodegen 生成物：project.yml 是唯一源，clone 后跑 `xcodegen generate` 即可
+DshDock.xcodeproj/
+Info.plist

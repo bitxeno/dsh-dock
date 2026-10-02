@@ -1,0 +1,29 @@
+name: DshDock
+options:
+  bundleIdPrefix: com.xenori
+  deploymentTarget:
+    macOS: "15.0"
+targets:
+  DshDock:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: DshDock
+        CFBundleShortVersionString: 0.1.0
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+    entitlements:
+      path: DshDock.entitlements
+    settings:
+      base:
+        SWIFT_VERSION: "5.0"
+        MACOSX_DEPLOYMENT_TARGET: "15.0"
+        PRODUCT_BUNDLE_IDENTIFIER: com.xenori.dshdock
+        PRODUCT_NAME: DshDock
+        ENABLE_HARDENED_RUNTIME: YES
+        CODE_SIGN_STYLE: Automatic
+        SWIFT_STRICT_CONCURRENCY: minimal
