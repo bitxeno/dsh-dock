@@ -128,9 +128,11 @@ jobs:
         if: env.TAP_REPO != '' && env.TAP_TOKEN != ''
         run: |
           set -euo pipefail
-          # OAuth token 走 token-as-username 形式；x-access-token: 前缀只认 GitHub App token
-          # （首版用 x-access-token 推送被拒：Invalid username or token，实测踩坑）。
-          git clone "https://${TAP_TOKEN}@github.com/${TAP_REPO}.git" tap
+          # HTTPS 认证必须是 用户名:token 成对形式（两次实测踩坑）：
+          # x-access-token:<oauth-token> → Invalid username or token（那是 App token 专用）；
+          # https://<token>@ → push 时 git 交互式索要密码，CI 无终端直接失败。
+          TAP_OWNER="${TAP_REPO%%/*}"
+          git clone "https://${TAP_OWNER}:${TAP_TOKEN}@github.com/${TAP_REPO}.git" tap
           mkdir -p tap/Casks
           cp dist/dshdock.rb tap/Casks/dshdock.rb
           cd tap
