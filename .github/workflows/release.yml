@@ -119,7 +119,9 @@ jobs:
         if: env.TAP_REPO != '' && env.TAP_TOKEN != ''
         run: |
           set -euo pipefail
-          git clone "https://x-access-token:${TAP_TOKEN}@github.com/${TAP_REPO}.git" tap
+          # OAuth token 走 token-as-username 形式；x-access-token: 前缀只认 GitHub App token
+          # （首版用 x-access-token 推送被拒：Invalid username or token，实测踩坑）。
+          git clone "https://${TAP_TOKEN}@github.com/${TAP_REPO}.git" tap
           mkdir -p tap/Casks
           cp dist/dshdock.rb tap/Casks/dshdock.rb
           cd tap
