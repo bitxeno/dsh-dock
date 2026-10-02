@@ -206,6 +206,11 @@ open ~/Library/Developer/Xcode/DerivedData/.../DshDock.app  # 或 Finder 双击�
   strict、desc 不含平台名）→ GitHub Release 附 DMG/checksums/cask。可选 secrets
   `HOMEBREW_TAP_REPO`+`HOMEBREW_TAP_TOKEN` 自动把 cask 推到 tap 仓库，用户
   `brew install --cask <owner>/tap/dshdock`；未配则 cask 附在 Release 资产里手动拷。
+  cask 带 `postflight_steps` 钩子装完自动 `xattr -dr com.apple.quarantine`——brew
+  安装路径无 Gatekeeper 拦截；直连 DMG 的用户仍需手动去隔离（caveats 说明）。
+  新 install-steps DSL 实测：路径用 `{{appdir}}` 模板标记（steps 块内没有 `appdir`
+  方法、`base:` 只锚定命令不锚定 args、cop 只认纯字符串参数），块内只允许 `run`
+  等步骤调用。tap 在本机是 git 克隆，改完远端必须手动 pull 克隆再测，否则测到旧版。
   打包命令与 CI 相同，已本地全链路干跑验证（构建/挂载/lipo/style）；`dist/`、
   `build/` 已 gitignore。ad-hoc 构建未公证，用户首次启动需右键打开或 xattr 去隔离。
 
