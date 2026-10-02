@@ -1,0 +1,130 @@
+name: Release
+
+# 推 v* 标签自动构建打包发布；也可在 Actions 页手动触发（生成 dev 版本号）。
+# 产物：通用二进制 DMG + SHA256 校验和 + Homebrew cask 文件（附在 Release 里）。
+# 可选：配置 secrets HOMEBREW_TAP_REPO（如 bitxeno/homebrew-tap）与
+# HOMEBREW_TAP_TOKEN（对该 tap 仓库有 contents:write 的 PAT），会自动把
+# cask 推到 tap 仓库，用户即可 `brew install --cask bitxeno/tap/dshdock`。
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Derive version
+        run: |
+          if [[ "$GITHUB_REF_NAME" == v* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="0.0.0-dev.$(date +%Y%m%d%H%M%S)"
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Generate project
+        run: xcodegen generate
+
+      - name: Build (universal, ad-hoc signed)
+        run: |
+          set -euo pipefail
+          # 无证书环境用 ad-hoc 签名 + hardened runtime；发布说明里写明
+          # 首次启动需右键打开或 xattr 去隔离。配好 Developer ID 证书后可加公证。
+          xcodebuild \
+            -project DshDock.xcodeproj \
+            -scheme DshDock \
+            -configuration Release \
+            -destination "generic/platform=macOS" \
+            -derivedDataPath build \
+            ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="-" DEVELOPMENT_TEAM= \
+            build
+
+      - name: Stamp version into app bundle
+        run: |
+          set -euo pipefail
+          APP="build/Build/Products/Release/DshDock.app"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" "$APP/Contents/Info.plist"
+
+      - name: Package DMG
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          APP="build/Build/Products/Release/DshDock.app"
+          hdiutil create -volname "DshDock $VERSION" \
+            -srcfolder "$APP" -ov -format UDZO \
+            "dist/DshDock-$VERSION.dmg"
+
+      - name: Checksums and Homebrew cask
+        run: |
+          set -euo pipefail
+          cd dist
+          shasum -a 256 "DshDock-$VERSION.dmg" > checksums.txt
+          SHA=$(shasum -a 256 "DshDock-$VERSION.dmg" | awk '{print $1}')
+          cat > dshdock.rb <<RUBY
+          # typed: strict
+          # frozen_string_literal: true
+
+          cask "dshdock" do
+            version "$VERSION"
+            sha256 "$SHA"
+
+            url "https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION/DshDock-$VERSION.dmg"
+            name "DshDock"
+            desc "Desktop shell hosting managed dsh web"
+            homepage "https://github.com/$GITHUB_REPOSITORY"
+
+            app "DshDock.app"
+
+            caveats <<~EOS
+              构建 未做公证（ad-hoc 签名）。首次启动若被 Gatekeeper 拦截：
+              右键 App 选"打开"，或执行
+                xattr -dr com.apple.quarantine /Applications/DshDock.app
+            EOS
+          end
+          RUBY
+          ruby -c dshdock.rb
+
+      - name: Create release and upload artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+          files: |
+            dist/DshDock-${{ env.VERSION }}.dmg
+            dist/checksums.txt
+            dist/dshdock.rb
+
+      - name: Push cask to Homebrew tap
+        env:
+          TAP_REPO: ${{ secrets.HOMEBREW_TAP_REPO }}
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        # 未配置 secrets 时优雅跳过：cask 已附在 Release 资产里，可手动拷进 tap。
+        if: env.TAP_REPO != '' && env.TAP_TOKEN != ''
+        run: |
+          set -euo pipefail
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/${TAP_REPO}.git" tap
+          mkdir -p tap/Casks
+          cp dist/dshdock.rb tap/Casks/dshdock.rb
+          cd tap
+          git config user.name "dsh-dock release bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add Casks/dshdock.rb
+          git diff --cached --quiet || git commit -m "dshdock ${VERSION}"
+          git push

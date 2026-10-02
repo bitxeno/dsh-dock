@@ -200,6 +200,14 @@ open ~/Library/Developer/Xcode/DerivedData/.../DshDock.app  # 或 Finder 双击�
 ```
 
 - 验证清单：终端能跑但 Finder 双击也能解析 dsh；端口占用页；kill -9 旧进程后重启；缺失 dsh 时 npx fallback；缺失页复制命令去终端可复现；鼠标离开顶部 2s 工具栏消失；设置 Apply 触发重启。
+- 发布：推 `v*` 标签触发 `.github/workflows/release.yml`（也可手动 dispatch）——
+  universal（arm64+x86_64）ad-hoc 签名构建 → PlistBuddy 把版本写进包内 Info.plist
+  → hdiutil 打 DMG → SHA256 → 生成 cask（头注释按 `brew style` 要求：typed 在前、
+  strict、desc 不含平台名）→ GitHub Release 附 DMG/checksums/cask。可选 secrets
+  `HOMEBREW_TAP_REPO`+`HOMEBREW_TAP_TOKEN` 自动把 cask 推到 tap 仓库，用户
+  `brew install --cask <owner>/tap/dshdock`；未配则 cask 附在 Release 资产里手动拷。
+  打包命令与 CI 相同，已本地全链路干跑验证（构建/挂载/lipo/style）；`dist/`、
+  `build/` 已 gitignore。ad-hoc 构建未公证，用户首次启动需右键打开或 xattr 去隔离。
 
 ## 14. 风险与 V2
 

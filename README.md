@@ -40,6 +40,29 @@ open "$APP"
 从 Finder 双击启动也一样能解析 `brew` 装的 `dsh`
 （GUI App 的 PATH 是残缺的，工程里走了 login-shell 解析，`docs/DESIGN.md §4`）。
 
+## 安装（发布版）
+
+推 `v*` 标签（或在 Actions 页手动触发）会自动构建通用二进制（arm64 + x86_64）、
+打 DMG、算 SHA256、生成 Homebrew cask 并发布到 GitHub Releases，见
+`.github/workflows/release.yml`。
+
+- **直接下载**：到 [Releases](https://github.com/bitxeno/dsh-dock/releases) 下载
+  `DshDock-<版本>.dmg`。构建为 ad-hoc 签名（未公证），首次启动若被 Gatekeeper
+  拦截：右键 App 选"打开"，或执行
+  `xattr -dr com.apple.quarantine /Applications/DshDock.app`。
+- **Homebrew（自定义 tap）**：需要先建一个 `homebrew-tap` 仓库（如
+  `bitxeno/homebrew-tap`），然后在 dsh-dock 仓库配置两个 Actions secrets：
+  `HOMEBREW_TAP_REPO`（如 `bitxeno/homebrew-tap`）和
+  `HOMEBREW_TAP_TOKEN`（对该 tap 仓库有 contents:write 的 PAT）。
+  配好后每次发布会自动更新 tap 里的 cask，用户即可：
+
+  ```bash
+  brew install --cask bitxeno/tap/dshdock
+  ```
+
+  未配 secrets 时，cask 会附在 Release 资产里（`dshdock.rb`），手动拷进
+  tap 仓库的 `Casks/` 目录即可，效果相同。
+
 ## 用 sweetpad 启动（推荐）
 
 [sweetpad](https://github.com/sweetpad-dev/sweetpad) 是 human 版的 `xcodebuild`，
