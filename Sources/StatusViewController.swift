@@ -27,13 +27,17 @@ final class StatusViewController: NSViewController {
         page.layer?.backgroundColor = NSColor.textBackgroundColor.cgColor
 
         // ---- 内容列（左对齐） ----
-        let warning = NSImage(systemSymbolName: "exclamationmark.triangle",
-                              accessibilityDescription: "出错了")
-        iconView.image = warning?.withSymbolConfiguration(.init(pointSize: 34, weight: .regular))
-        iconView.contentTintColor = .secondaryLabelColor
+        // 错误插画（Assets: ErrorWhale）只钉宽度，高度按位图宽高比推，别写死比例。
+        iconView.image = NSImage(named: "ErrorWhale")
+        iconView.imageScaling = .scaleProportionallyUpOrDown
         iconView.translatesAutoresizingMaskIntoConstraints = false
-        iconView.widthAnchor.constraint(equalToConstant: 48).isActive = true
-        iconView.heightAnchor.constraint(equalToConstant: 44).isActive = true
+        let iconWidth: CGFloat = 140
+        iconView.widthAnchor.constraint(equalToConstant: iconWidth).isActive = true
+        if let icon = iconView.image, icon.size.width > 0 {
+            iconView.heightAnchor.constraint(
+                equalToConstant: iconWidth * icon.size.height / icon.size.width
+            ).isActive = true
+        }
 
         titleLabel.font = .systemFont(ofSize: 24)
         titleLabel.maximumNumberOfLines = 2
