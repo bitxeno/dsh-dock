@@ -1,15 +1,61 @@
-# DshDock
+<div align="center">
+  <img src="./docs/image/logo.png" height="256">
 
-[English](./README.md) | [中文](./README_zh.md)
+  <h1 align="center">DshDock</h1>
+</div>
 
-DshDock 是 macOS 上的 dsh 桌面应用。打开就能用，dsh 跑在独立窗口里，不需要浏览器。
+<div align="center">
+
+<img src="https://img.shields.io/badge/macOS-15%2B-black?logo=apple&logoColor=white"
+            alt="macOS 15+">
+<a href="https://github.com/bitxeno/dsh-dock/blob/main/LICENSE">
+<img src="https://img.shields.io/github/license/bitxeno/dsh-dock"
+            alt="License"></a>
+<a href="https://github.com/bitxeno/dsh-dock/releases">
+<img src="https://img.shields.io/github/downloads/bitxeno/dsh-dock/total.svg"
+            alt="Downloads"></a>
+
+</div>
+
+
+<div align="center">
+
+[English](./README.md) | 中文
+
+</div>
+
+## DshDock
+
+DshDock 是 macOS 上的 dsh 桌面应用，基于 AppKit + WebView 实现，体积小巧，无需浏览器。
+
+<p align="center">
+  <img src="./docs/image/screenshot_home.png" alt="DshDock 主窗口" width="60%">
+</p>
+
+## 特性
+
+- 支持设置 profile 和 DSH_HOME
+- 兼容 dsh-market 插件重启处理
 
 ## 安装
 
-- **Homebrew：**`brew install --cask bitxeno/tap/dshdock`
-- **直接下载：**到 [Releases](https://github.com/bitxeno/dsh-dock/releases) 下载 `DshDock-<版本>.dmg`，拖进应用程序文件夹。
+### 安装官方 deepseek-harness
 
-首次启动若被系统拦截（App 未公证）：右键 App 选"打开"。或执行 `xattr -dr com.apple.quarantine /Applications/DshDock.app`。
+```
+npm -g install @deepseek-ai/dsh
+```
+
+### Homebrew
+
+```
+brew install --cask bitxeno/tap/dshdock
+```
+
+### 直接下载
+
+到 [Releases](https://github.com/bitxeno/dsh-dock/releases) 下载 `DshDock-<版本>.dmg`，拖进应用程序文件夹。
+
+> 首次启动若被系统拦截（App 未公证）：右键 App 选"打开"。或执行 `xattr -dr com.apple.quarantine /Applications/DshDock.app`。
 
 需要 macOS 15+。
 
@@ -32,16 +78,10 @@ DshDock 是 macOS 上的 dsh 桌面应用。打开就能用，dsh 跑在独立�
 | 端口 | `38811` | 和本机其他应用冲突时才改 |
 | DSH_HOME（"高级选项"里） | 空 | 仅当 dsh 确实需要自定义 `DSH_HOME`；留空则启动完全不传该变量 |
 
-## 出问题了
-
-- **提示找不到 dsh：**执行 `npm install -g @deepseek-ai/dsh@latest` 安装，然后重启 App。
-- **端口被占用：**去设置里换个端口，或关掉占用它的应用。
-- **空白页 / 一直失败：**点重启按钮，再看错误页上的详情。
-- 日志文件（求助时附上）：`~/Library/Logs/com.xenori.dshdock/dsh.log`
 
 ---
 
-## 开发者信息
+## 开发
 
 - 构建需要 Xcode 26 + `xcodegen`：`xcodegen generate`，再 `xcodebuild -project DshDock.xcodeproj -scheme DshDock -configuration Debug build`。
 - 底层实际执行的是 `<binary> [web | --profile <名称>] --no-open --port <port> <extra>`——Extra Args 里填 `--profile <名称>` 会替换默认的 `web`；设置存在 `UserDefaults`（`dsh.binaryPath` / `dsh.extraArgs` / `dsh.port` / `dsh.dshHome`）。
