@@ -24,7 +24,7 @@ private final class TerminalIconView: NSView {
 }
 
 /// 设置页：对齐 dsh 桌面端设置窗口（图标头 + 图标行 + 右下主按钮，无取消）。
-final class SettingsViewController: NSViewController {
+final class SettingsViewController: NSViewController, NSTextFieldDelegate {
     var onApply: ((DshConfig) -> Void)?
 
     private var config: DshConfig
@@ -117,6 +117,8 @@ final class SettingsViewController: NSViewController {
         // 字段初值统一走 populate（init 与"恢复默认"共用），必须在 stepper 的
         // min/max 配好之后调，否则 integerValue 会被默认范围钳住。
         populate(config)
+        // 用户键入的显隐同步走 delegate（field editor 逐键回调）。
+        [binaryField, extraField, portField, homeField].forEach { $0.delegate = self }
         let portRow = makeFieldRow(icon: "network", title: "Port (1–65535)",
                                    sub: "dsh web 服务监听端口，应用后生效", field: portField)
 
@@ -249,6 +251,7 @@ final class SettingsViewController: NSViewController {
 
     @objc private func didStepPort() {
         portField.stringValue = String(portStepper.integerValue)
+        syncResetVisibility()
     }
 
     /// 把暂存字段回填为 config（init 初值与"恢复默认"共用）。
@@ -258,6 +261,30 @@ final class SettingsViewController: NSViewController {
         portField.stringValue = String(c.port)
         portStepper.integerValue = min(max(c.port, 1), 65535)
         homeField.stringValue = c.dshHome
+        // 程序化赋值不触发 controlTextDidChange，显隐在此统一同步。
+        syncResetVisibility()
+    }
+
+    /// 暂存表单是否 ≠ 工厂默认（决定"恢复默认"按钮显隐；与 didApply 同一规范化：
+    /// binary 留空视为默认 dsh，端口非数字视为脏）。
+    private var isDirtyFromDefaults: Bool {
+        let binary = binaryField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let home = homeField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let port = Int(portField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines))
+        return (binary != DshConfig.defaultBinary && !binary.isEmpty)
+            || extraField.stringValue != DshConfig.defaultExtra
+            || port != DshConfig.defaultPort
+            || home != DshConfig.defaultDshHome
+    }
+
+    private func syncResetVisibility() {
+        resetButton.isHidden = !isDirtyFromDefaults
+    }
+
+    /// 用户键入（field editor）逐键回调；程序化赋值不走这里，
+    /// populate/didStepPort 里手动调 syncResetVisibility()。
+    func controlTextDidChange(_ obj: Notification) {
+        syncResetVisibility()
     }
 
     /// "恢复默认"：全部字段回填默认值（DSH_HOME 清空并收起高级区），并清掉行内报错。
