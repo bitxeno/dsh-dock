@@ -43,6 +43,7 @@ final class SettingsViewController: NSViewController {
     private let advancedHeader = NSButton(title: "高级选项", target: nil, action: nil)
     private var advancedBody: NSView?
     private var contentStack: NSStackView?
+    private let resetButton = NSButton(title: "", target: nil, action: nil)
     private let errorLabel = NSTextField(labelWithString: "")
 
     init(config: DshConfig, providerText: String) {
@@ -85,7 +86,6 @@ final class SettingsViewController: NSViewController {
         header.alignment = .centerY
 
         // ---- 行（竖屏）：图标+标题/副标题在上，输入框独占一行在下 ----
-        binaryField.stringValue = config.binaryPath
         binaryField.placeholderString = "dsh"
         binaryField.bezelStyle = .roundedBezel
         // 备注按实际功能（不照抄参考稿）：Binary Path 行 = 输入提示 + 当前生效的
@@ -94,19 +94,16 @@ final class SettingsViewController: NSViewController {
                                      sub: "请输入 dsh，可填绝对路径\n当前生效：\(providerText)",
                                      field: binaryField)
 
-        extraField.stringValue = config.extraArgs
         extraField.placeholderString = "例如：--verbose"
         extraField.bezelStyle = .roundedBezel
         let extraRow = makeFieldRow(icon: "chevron.left.forwardslash.chevron.right", title: "Extra Args",
                                     sub: "附加参数，端口由下方字段注入", field: extraField)
 
-        portField.stringValue = String(config.port)
         portField.placeholderString = "38811"
         portField.bezelStyle = .roundedBezel
         portStepper.minValue = 1
         portStepper.maxValue = 65535
         portStepper.increment = 1
-        portStepper.integerValue = min(max(config.port, 1), 65535)
         portStepper.target = self
         portStepper.action = #selector(didStepPort)
         // stepper 内嵌在输入框右缘（对齐参考稿），不是旁边挂一个独立控件。
@@ -117,11 +114,13 @@ final class SettingsViewController: NSViewController {
             portStepper.trailingAnchor.constraint(equalTo: portField.trailingAnchor, constant: -6),
             portStepper.centerYAnchor.constraint(equalTo: portField.centerYAnchor),
         ])
+        // 字段初值统一走 populate（init 与"恢复默认"共用），必须在 stepper 的
+        // min/max 配好之后调，否则 integerValue 会被默认范围钳住。
+        populate(config)
         let portRow = makeFieldRow(icon: "network", title: "Port (1–65535)",
                                    sub: "dsh web 服务监听端口，应用后生效", field: portField)
 
         // ---- 高级选项（默认折叠；已配置 DSH_HOME 时展开，配置了却藏着等于不可见） ----
-        homeField.stringValue = config.dshHome
         homeField.placeholderString = "可选，留空不传"
         homeField.bezelStyle = .roundedBezel
         let homeRow = makeFieldRow(icon: "house", title: "DSH_HOME",
@@ -169,9 +168,15 @@ final class SettingsViewController: NSViewController {
         let btnSpacer = NSView()
         btnSpacer.setContentHuggingPriority(.init(1), for: .horizontal)
         btnSpacer.setContentCompressionResistancePriority(.init(1), for: .horizontal)
-        let btnRow = NSStackView(views: [btnSpacer, apply])
+        stylePlain(resetButton, "恢复默认")
+        resetButton.target = self
+        resetButton.action = #selector(resetToDefaults)
+        let btnRow = NSStackView(views: [resetButton, btnSpacer, apply])
         btnRow.orientation = .horizontal
         btnRow.spacing = 0
+        // 底对齐（alignment 默认居中；.bottom 垂直于横向轴是合法值，沿轴的
+        // .leading/.trailing 才会算出垃圾 frame）。
+        btnRow.alignment = .bottom
         btnRow.translatesAutoresizingMaskIntoConstraints = false
         btnRow.widthAnchor.constraint(equalToConstant: contentWidth).isActive = true
 
@@ -246,6 +251,27 @@ final class SettingsViewController: NSViewController {
         portField.stringValue = String(portStepper.integerValue)
     }
 
+    /// 把暂存字段回填为 config（init 初值与"恢复默认"共用）。
+    private func populate(_ c: DshConfig) {
+        binaryField.stringValue = c.binaryPath
+        extraField.stringValue = c.extraArgs
+        portField.stringValue = String(c.port)
+        portStepper.integerValue = min(max(c.port, 1), 65535)
+        homeField.stringValue = c.dshHome
+    }
+
+    /// "恢复默认"：全部字段回填默认值（DSH_HOME 清空并收起高级区），并清掉行内报错。
+    /// 只动暂存值——不落盘、不重启，走"应用并重启"才生效（与弹层 staged 语义一致）。
+    /// 也供无头渲染测试驱动。
+    @objc func resetToDefaults() {
+        populate(DshConfig(binaryPath: DshConfig.defaultBinary,
+                           extraArgs: DshConfig.defaultExtra,
+                           port: DshConfig.defaultPort,
+                           dshHome: DshConfig.defaultDshHome))
+        setAdvancedOpen(false)
+        errorLabel.isHidden = true
+    }
+
     private var isAdvancedOpen: Bool { advancedBody?.isHidden == false }
 
     /// "高级选项"展开/收起（也供无头渲染测试驱动）。
@@ -300,6 +326,15 @@ final class SettingsViewController: NSViewController {
             return
         }
         onApply?(cfg)
+    }
+
+    /// 次要动作（恢复默认）：灰字无边框，弱于右下蓝色主按钮。
+    private func stylePlain(_ b: NSButton, _ title: String) {
+        b.isBordered = false
+        b.attributedTitle = NSAttributedString(string: title, attributes: [
+            .font: NSFont.systemFont(ofSize: 13),
+            .foregroundColor: NSColor.secondaryLabelColor,
+        ])
     }
 
     private func showError(_ s: String) {

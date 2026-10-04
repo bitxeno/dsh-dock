@@ -142,6 +142,11 @@
   高 32pt（默认方边框与参考稿不符）；内容根视图必须设不透明底
   （`textBackgroundColor`）——popover 默认半透明，会被背后深色网页染灰（实测）。
   改完不自动生效，必须点应用；应用时做校验（二进制可执行性、端口范围），非法则行内报错不关闭。
+  底部按钮行左侧另有一颗灰字"恢复默认"（HIG 的 Restore Defaults 位，与右下主按钮
+  相对）：全部字段回填默认值（binary=dsh/extra 空/port 38811/DSH_HOME 清空）、收起
+  高级区、清行内报错——只动暂存值，不落盘不重启，与弹层 staged 语义一致，走
+  "应用并重启"才生效；字段初值收进 `populate(_:)`，init 与重置共用（必须在
+  stepper min/max 配置之后调用，否则 integerValue 被默认范围钳住）。
 - 设置页"高级选项"折叠区（port 行之下）：默认收起，已配置 `DSH_HOME` 时打开设置
   自动展开（配置了却藏着等于不可见）。折叠头 = 无边框按钮（chevron.right/down
   + "高级选项"），展开/收起只切内容行 `isHidden`（NSStackView 默认 detach 隐藏
