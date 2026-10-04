@@ -39,6 +39,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, WKNaviga
         super.init(window: win)
         win.delegate = self
         setupViews(win: win)
+        // 通知桥：挂 delegate 并绑定 WebView。这里不申请权限——按需授权，
+        // 等页面调用 Notification.requestPermission() 时才弹（见 NotifyBridge）。
+        NotifyBridge.shared.install()
+        NotifyBridge.shared.attach(webView: webView)
         bindService()
         boot()
     }
@@ -62,6 +66,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, WKNaviga
         content.addSubview(webView)
         // 插件重启接管：钩子按偏好注入（默认开），消息名 dshDockRestart → didTapRestart。
         wkConfig.userContentController.add(self, name: "dshDockRestart")
+        // 系统通知桥：WKWebView 没有 Notification / Service Worker，插件（dsh-notify-me）
+        // 只靠浏览器 API 发通知，在壳里整条链路是死的，用原生桥顶上。
+        wkConfig.userContentController.add(NotifyBridge.shared, name: NotifyBridge.messageName)
         // fullSizeContentView 下内容会伸到透明标题栏底下，顶部按标题栏高度避让。
         webTopConstraint = webView.topAnchor.constraint(equalTo: content.topAnchor)
         webTopConstraint.isActive = true
@@ -579,6 +586,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, WKNaviga
     private func applyRestartHookScript() {
         let ucc = webView.configuration.userContentController
         ucc.removeAllUserScripts()
+        // 通知桥 shim 必须在 atDocumentStart 且每次重建（removeAllUserScripts 会清掉它）：
+        // 插件在 apply() 里就读 navigator.serviceWorker / Notification.permission。
+        ucc.addUserScript(WKUserScript(source: NotifyBridge.shimSource,
+                                       injectionTime: .atDocumentStart, forMainFrameOnly: false))
         let enabled = AppPreferences.interceptPluginRestart
         if enabled {
             ucc.addUserScript(WKUserScript(source: Self.restartHookSource(enabled: true),

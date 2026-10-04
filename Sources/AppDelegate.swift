@@ -14,6 +14,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         windowController = MainWindowController()
         windowController?.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
+        // 通知权限不在这里要：按需授权（Chrome 语义），等页面真的调用
+        // Notification.requestPermission() 时才弹，见 NotifyBridge。
     }
 
     @objc private func reopenFromSecondInstance() {

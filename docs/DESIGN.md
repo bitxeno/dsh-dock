@@ -178,6 +178,52 @@
   已知边界：dsh-market 的 recovery-apply 流程也会重启宿主，未拦截（会走 detached
   助手 → App 显示意外退出页，用"重试"或"强制结束并重启"可恢复）。
 
+## 9-A. 系统通知原生桥（`NotifyBridge`）
+
+`WKWebView` 不实现 Web Notifications，也注册不了 Service Worker。浏览器层插件
+（如 dsh-notify-me）在壳里 `"Notification" in window === false` → `canToast()`
+恒 false → 系统通知与「同意/拒绝」快捷裁决按钮整条链路失效，只剩提示音和标题标记，
+设置页还会显示"通知权限尚未授予"。`NotifyBridge` 用一层 shim + 原生桥顶上，
+**不改动插件任何代码**。
+
+- **注入**：`WKUserScript`（`.atDocumentStart`，`forMainFrameOnly: false`）冒充
+  `Notification` 构造器与 `navigator.serviceWorker`；必须与插件重启钩子一起在
+  `applyRestartHookScript()` 里重建——该方法 `removeAllUserScripts()` 会连它清掉。
+  shim 另把读出来非 true 的 `isSecureContext` 扶正（否则插件直接判"不支持 SW"）。
+- **页面 → 原生**：`webkit.messageHandlers.dshDockNotify`，op 四种：
+  `show`（title/body/tag/actions/data.key/data.sessionId/data.focus）、`close`、
+  `request`（触发原生授权）、`query`（shim 每次文档启动主动拉权限）。同 tag 投递前
+  先 `removeDeliveredNotifications` 顶掉上一条（对齐插件的 `renotify`）；
+  `content.sound = nil`——插件用 WebAudio 自己响（它传 `silent:true`），原生再叠
+  一声就是双响。
+- **原生 → 页面**：`evaluateJavaScript` 调 `window.__dshDockNotify._dispatch()`，
+  shim 把消息投进插件自己已挂的 `BroadcastChannel('dsh-notify-me:bridge')`
+  （→ `onBridgeMessage` → `decidePending` 裁决 / `focusSession` 切会话）；无
+  BroadcastChannel 退 `serviceWorker message` 监听，再退 `onclick`。点正文且
+  `focus !== false` 时原生 `NSApp.activate` 抬窗，点按钮不抬（插件语义：裁决不该
+  把窗口拽上来）。
+- **权限真实性（拉模式，别改回推模式）**：`Notification.permission` 反映 macOS 真实
+  授权。shim 在**每次文档启动**主动 `postMessage({op:"query"})` 向原生要状态，原生
+  查完 `_setPermission()` 回灌。不能只靠原生单向推送：`attach()` 时 WebView 还没加载
+  任何页面（服务刚要启动），`evaluateJavaScript` 落在空白页上直接丢掉，插件随后读到
+  的一直是 default——表现为"系统明明允许了，设置页还显示权限未授予"。权限值同时缓存
+  进 `localStorage: dshDockNotify.permission` 作首帧占位（shim 跑在 `atDocumentStart`，
+  真值晚一拍），换端口即换 origin，缓存自然失效。状态查询 NSLog 出 raw 值，报障时
+  据此区分"真的未授权"与"宿主读错"。
+- **按需授权（Chrome 语义，别改回启动即弹）**：不在启动时向 macOS 要权限，只有页面
+  真的调用 `Notification.requestPermission()` 才 `requestAuthorization()`。时机因此由
+  插件自己决定——dsh-notify-me 在页面第一次用户手势（pointerdown/keydown）或设置页点
+  测试按钮时调用它，于是"装了插件、真的要用到通知"才弹窗；没装提醒插件的用户永远
+  看不到授权窗。启动时只做只读的 `query`。
+- **不缓存"已问过"标记**：`requestPermission()` 重复调用时若仍是 `notDetermined`
+  （用户没理上次弹窗）就再问一次；用户一旦做了决定，macOS 自己记住、后续
+  `requestAuthorization` 直接回结果而不弹窗，不需要本地标记挡（挡了反而把"没理弹窗"
+  永久变成"再也不问"，用户只在系统设置里改不回来）。
+- **`UNUserNotificationCenterDelegate`**：`willPresent` 必须显式放行 `[.banner, .list]`，
+  否则 App 在前台时一条通知都看不到；带按钮的通知走预注册 category
+  `dshDockNotify.approval`，按钮标题随插件语言变（同意/拒绝、Approve/Reject），
+  所以每次投递前按当前文案重注册一次。
+
 ## 10. 窗口与生命周期
 
 - 单实例单 dsh。启动即自动起 dsh；红灯（关闭按钮）= 隐藏窗口（`orderOut`），
@@ -215,6 +261,7 @@ Sources/
   LogStore.swift            # 文件轮转 + 环 buffer
   DshService.swift          # Process 管家 + TCP 预检 + 就绪轮询 + restart
   MainWindowController.swift# NSWindow + WKWebView + 标题栏 accessory + loading 视图（错误/状态页在 StatusViewController）
+  NotifyBridge.swift          # 系统通知原生桥：Notification/SW shim + UNUserNotificationCenter（见 §9-A）
   StatusViewController.swift # 错误/状态页（Chrome 断网页式全页布局）：详情展开日志 + 打开日志文件；重试 / 端口占用时强制结束并重启
   SettingsViewController.swift # popover 表单 + 校验 + Apply&Restart
 Info.plist                  # NSAllowsLocalNetworking 等

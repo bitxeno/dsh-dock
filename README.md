@@ -36,6 +36,7 @@ DshDock is a desktop app for dsh on macOS, built with AppKit + WebView — small
 
 - Configurable profile and DSH_HOME
 - Handles dsh-market plugin restarts
+- Works with system notification plugins
 
 ## Install
 

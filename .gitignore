@@ -8,3 +8,6 @@ Info.plist
 # 本地打包产物
 dist/
 build/
+
+# IDE 生成物（内容与 .gitignore 重复，属本机工具配置）
+.zcodeignore

@@ -36,6 +36,7 @@ DshDock 是 macOS 上的 dsh 桌面应用，基于 AppKit + WebView 实现，体
 
 - 支持设置 profile 和 DSH_HOME
 - 兼容 dsh-market 插件重启处理
+- 兼容系统通知插件
 
 ## 安装
 
