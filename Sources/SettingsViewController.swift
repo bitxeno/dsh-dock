@@ -31,11 +31,18 @@ final class SettingsViewController: NSViewController {
     private var providerText: String
     /// 竖屏内容宽：输入框独占一行（对齐参考稿 ~300pt 内容宽的窄长卡片）。
     private let contentWidth: CGFloat = 300
+    /// 根视图四边留白（loadView 里 stack 到 root 的边距，弹层尺寸反推用）。
+    private let contentInsetH: CGFloat = 22
+    private let contentInsetV: CGFloat = 20
 
     private let binaryField = NSTextField()
     private let extraField = NSTextField()
     private let portField = NSTextField()
     private let portStepper = NSStepper()
+    private let homeField = NSTextField()
+    private let advancedHeader = NSButton(title: "高级选项", target: nil, action: nil)
+    private var advancedBody: NSView?
+    private var contentStack: NSStackView?
     private let errorLabel = NSTextField(labelWithString: "")
 
     init(config: DshConfig, providerText: String) {
@@ -113,6 +120,24 @@ final class SettingsViewController: NSViewController {
         let portRow = makeFieldRow(icon: "network", title: "Port (1–65535)",
                                    sub: "dsh web 服务监听端口，应用后生效", field: portField)
 
+        // ---- 高级选项（默认折叠；已配置 DSH_HOME 时展开，配置了却藏着等于不可见） ----
+        homeField.stringValue = config.dshHome
+        homeField.placeholderString = "可选，留空不传"
+        homeField.bezelStyle = .roundedBezel
+        let homeRow = makeFieldRow(icon: "house", title: "DSH_HOME",
+                                   sub: "可选环境变量，应用后随启动传给 dsh；留空不传",
+                                   field: homeField)
+        advancedBody = homeRow
+        advancedHeader.isBordered = false
+        advancedHeader.imagePosition = .imageLeading
+        advancedHeader.attributedTitle = NSAttributedString(string: "高级选项", attributes: [
+            .font: NSFont.systemFont(ofSize: 13, weight: .medium),
+            .foregroundColor: NSColor.secondaryLabelColor,
+        ])
+        advancedHeader.target = self
+        advancedHeader.action = #selector(didToggleAdvanced)
+        setAdvancedOpen(!config.dshHome.isEmpty)
+
         // ---- 错误行 + 分割线 + 右下主按钮（无取消，点弹层外关闭） ----
         errorLabel.font = .systemFont(ofSize: 11)
         errorLabel.textColor = .systemRed
@@ -150,17 +175,19 @@ final class SettingsViewController: NSViewController {
         btnRow.translatesAutoresizingMaskIntoConstraints = false
         btnRow.widthAnchor.constraint(equalToConstant: contentWidth).isActive = true
 
-        let stack = NSStackView(views: [header, binaryRow, extraRow, portRow, errorLabel, divider, btnRow])
+        let stack = NSStackView(views: [header, binaryRow, extraRow, portRow,
+                                        advancedHeader, homeRow, errorLabel, divider, btnRow])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 24
         stack.translatesAutoresizingMaskIntoConstraints = false
+        contentStack = stack
         root.addSubview(stack)
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 22),
-            stack.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -22),
-            stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 20),
-            stack.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -20),
+            stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: contentInsetH),
+            stack.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -contentInsetH),
+            stack.topAnchor.constraint(equalTo: root.topAnchor, constant: contentInsetV),
+            stack.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -contentInsetV),
             stack.widthAnchor.constraint(equalToConstant: contentWidth),
         ])
     }
@@ -219,9 +246,40 @@ final class SettingsViewController: NSViewController {
         portField.stringValue = String(portStepper.integerValue)
     }
 
+    private var isAdvancedOpen: Bool { advancedBody?.isHidden == false }
+
+    /// "高级选项"展开/收起（也供无头渲染测试驱动）。
+    func setAdvancedOpen(_ open: Bool) {
+        advancedBody?.isHidden = !open
+        let name = open ? "chevron.down" : "chevron.right"
+        let base = NSImage(systemSymbolName: name, accessibilityDescription: "高级选项") ?? NSImage()
+        advancedHeader.image = base.withSymbolConfiguration(.init(pointSize: 11, weight: .semibold)) ?? base
+        syncPopoverSize()
+    }
+
+    @objc private func didToggleAdvanced() {
+        setAdvancedOpen(!isAdvancedOpen)
+    }
+
+    /// popover 只在内容"装不下"时被约束顶大，收缩方向没有约束推它，不会自动回缩——
+    /// 必须显式回写 preferredContentSize 弹层才会跟着变矮。但不能读 view.fittingSize：
+    /// preferredContentSize 一旦写过，AppKit 就在根视图上装一条
+    /// `height == pref`（@501）的真实约束，fitting 从此被它污染、只涨不缩（实测）。
+    /// stack 自身的 fitting 不受污染，用它的高度 + 根视图留白反推弹层尺寸。
+    /// loadView 里的首次调用时 stack 还没建/视图未挂 popover，跳过留给 show 自取。
+    private func syncPopoverSize() {
+        guard view.window != nil, let stack = contentStack else { return }
+        view.layoutSubtreeIfNeeded()
+        preferredContentSize = NSSize(
+            width: contentWidth + 2 * contentInsetH,
+            height: stack.fittingSize.height + 2 * contentInsetV
+        )
+    }
+
     @objc private func didApply() {
         let binary = binaryField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let extra = extraField.stringValue
+        let home = homeField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let port = Int(portField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)) else {
             showError("端口必须是数字（1–65535）")
             return
@@ -229,7 +287,8 @@ final class SettingsViewController: NSViewController {
         let cfg = DshConfig(
             binaryPath: binary.isEmpty ? DshConfig.defaultBinary : binary,
             extraArgs: extra,
-            port: port
+            port: port,
+            dshHome: home
         )
         let errs = cfg.validate()
         if !errs.isEmpty {

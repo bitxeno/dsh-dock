@@ -31,6 +31,10 @@
 - `web --no-open --port <port>`：由 App 写死注入，不允许用户编辑。`extra` 中若含 `--port/-p/--bind/--bind-address`，启动前 strip 并在日志 +（可选）toast 提示“已忽略命令中的端口，以端口字段为准”。
 - `extra`：设置页 `Extra Args` 字符串，默认空。做 shell-like 切分（支持单/双引号、`\` 转义），不用幼稚 `split(" ")`。占位符提示 `例如：--verbose --data-dir "~/a b"`。
 - `port`：设置页数字字段，默认 `38811`，范围 `1–65535`。
+- 环境变量：设置页"高级选项"里的 `DSH_HOME`（默认空 = 启动不传，子进程环境保持
+  干净）；非空时作为 `DSH_HOME` 注入子进程环境（与 PATH 合并后的 env 一起）。
+  启动日志会记一行 `环境变量：DSH_HOME=…`（错误页"详情"可见），诊断命令前也带
+  `DSH_HOME=…` 前缀，保证复制到终端可复现。
 - 默认三元组效果：`dsh web --no-open --port 38811`。
 - npx 形态（见 §4）：`npx --yes @deepseek-ai/dsh web --no-open --port <port> <extra>`，端口/extra 规则完全一致。必须带 `--yes`，否则 GUI 无 stdin 会假死在安装确认上。
 
@@ -138,6 +142,16 @@
   高 32pt（默认方边框与参考稿不符）；内容根视图必须设不透明底
   （`textBackgroundColor`）——popover 默认半透明，会被背后深色网页染灰（实测）。
   改完不自动生效，必须点应用；应用时做校验（二进制可执行性、端口范围），非法则行内报错不关闭。
+- 设置页"高级选项"折叠区（port 行之下）：默认收起，已配置 `DSH_HOME` 时打开设置
+  自动展开（配置了却藏着等于不可见）。折叠头 = 无边框按钮（chevron.right/down
+  + "高级选项"），展开/收起只切内容行 `isHidden`（NSStackView 默认 detach 隐藏
+  视图）；popover 高度跟随要显式回写 `preferredContentSize`——弹层只在内容
+  "装不下"时被约束顶大，收缩方向没有约束推它，不回写就停在展开高度。且回写值
+  不能读 `view.fittingSize`：preferredContentSize 一旦写过，AppKit 在根视图上
+  装 `height == pref`（@501）真实约束，fitting 被污染、只涨不缩——用 stack 自身
+  fitting + 根视图留白反推（实测）。loadView 首次调用时视图未挂 popover，跳过
+  回写留给 show 时自取。内容复用 `makeFieldRow`：`DSH_HOME` 一行，可选环境
+  变量，应用后随启动注入 dsh 子进程（见 §3），留空不传。
 
 ## 9. WebView 策略（Q12/Q17）
 
@@ -171,7 +185,9 @@
 
 ## 11. 设置持久化
 
-- `UserDefaults`（suite 默认）：`dsh.binaryPath: String = "dsh"`，`dsh.extraArgs: String = ""`，`dsh.port: Int = 38811`。键名稳定，V2 加 `workingDirectory/env` 不迁移。
+- `UserDefaults`（suite 默认）：`dsh.binaryPath: String = "dsh"`，`dsh.extraArgs: String = ""`，
+  `dsh.port: Int = 38811`，`dsh.dshHome: String = ""`（"高级选项"里的 `DSH_HOME`，
+  空 = 启动不注入该变量）。键名稳定，不迁移；`workingDirectory` 仍是 V2 预留。
 - App 级偏好（`AppPreferences`，与 dsh 启动三元组分键、不进设置表单）：
   `app.interceptPluginRestart: Bool = true`（插件"立即重启"由 App 接管，见 §9/§8）。
 - 校验：port 越界、二进制不可执行（`isExecutableFile`）在 Apply 时拦截。
@@ -227,4 +243,5 @@ open ~/Library/Developer/Xcode/DerivedData/.../DshDock.app  # 或 Finder 双击�
 - MAS 沙盒：当前方案上架需重做（XPC Service / `smarter` 权限），V1 明确不做。
 - `dsh web` 输出格式变化：不依赖 stdout 关键字，只依赖 HTTP 探针，已规避。
 - npx 冷启动慢 + 需要网络装包：Error 页需展示 `npx` 日志尾，避免误判卡死。
-- V2：崩溃指数退避重启、MenuBar 常驻、workingDirectory/env 高级设置、多实例、自动更新（Sparkle）。
+- V2：崩溃指数退避重启、MenuBar 常驻、workingDirectory 高级设置、多实例、自动更新（Sparkle）。
+  （env 已提前落地：§3 的 `DSH_HOME`，2026-10。）

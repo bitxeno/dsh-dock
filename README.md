@@ -30,6 +30,7 @@ Most people can leave everything as-is.
 | dsh location | `dsh` | Only if the app says dsh can't be found and yours lives somewhere else |
 | Extra options | empty | Advanced use only, leave empty |
 | Port | `38811` | Only if it conflicts with another app on your Mac |
+| DSH_HOME (under "Advanced") | empty | Only when dsh specifically needs a custom `DSH_HOME`; left empty the variable is not passed at all |
 
 ## If something goes wrong
 
@@ -43,5 +44,5 @@ Most people can leave everything as-is.
 ## For developers
 
 - Building requires Xcode 26 + `xcodegen`: `xcodegen generate`, then build with `xcodebuild -project DshDock.xcodeproj -scheme DshDock -configuration Debug build`.
-- The app runs `<binary> web --no-open --port <port> <extra>` under the hood; settings are stored in `UserDefaults` (`dsh.binaryPath` / `dsh.extraArgs` / `dsh.port`).
+- The app runs `<binary> web --no-open --port <port> <extra>` under the hood; settings are stored in `UserDefaults` (`dsh.binaryPath` / `dsh.extraArgs` / `dsh.port` / `dsh.dshHome`).
 - Design details (in Chinese): `docs/DESIGN.md`

@@ -98,7 +98,8 @@ final class DshService: NSObject {
         parts += launch.prefixArgs
         parts += ["web", "--no-open", "--port", String(cfg.port)]
         parts += currentCleanedExtra
-        return shellJoin(parts)
+        let cmd = shellJoin(parts)
+        return cfg.dshHome.isEmpty ? cmd : "DSH_HOME=\(shellEscape(cfg.dshHome)) \(cmd)"
     }
 
     private func setState(_ s: State) {
@@ -163,6 +164,9 @@ final class DshService: NSObject {
         if !stripped.isEmpty {
             log.append("提示：已忽略命令中的自带参数（以端口字段为准）：\(stripped.joined(separator: " "))")
         }
+        if !config.dshHome.isEmpty {
+            log.append("环境变量：DSH_HOME=\(config.dshHome)")
+        }
 
         // 4) TCP 预检端口
         if tcpConnectSucceeds(port: config.port) {
@@ -193,6 +197,10 @@ final class DshService: NSObject {
         env["PATH"] = pathParts
             .filter { !$0.isEmpty && seenPaths.insert($0).inserted }
             .joined(separator: ":")
+        // 高级设置 DSH_HOME：空 = 不传，子进程环境保持干净。
+        if !config.dshHome.isEmpty {
+            env["DSH_HOME"] = config.dshHome
+        }
         proc.environment = env
 
         let out = Pipe()

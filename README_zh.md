@@ -30,6 +30,7 @@ DshDock 是 macOS 上的 dsh 桌面应用。打开就能用，dsh 跑在独立�
 | dsh 位置 | `dsh` | App 提示找不到 dsh、且你的 dsh 装在别处时才改 |
 | 额外参数 | 空 | 高级用法，留空 |
 | 端口 | `38811` | 和本机其他应用冲突时才改 |
+| DSH_HOME（"高级选项"里） | 空 | 仅当 dsh 确实需要自定义 `DSH_HOME`；留空则启动完全不传该变量 |
 
 ## 出问题了
 
@@ -43,5 +44,5 @@ DshDock 是 macOS 上的 dsh 桌面应用。打开就能用，dsh 跑在独立�
 ## 开发者信息
 
 - 构建需要 Xcode 26 + `xcodegen`：`xcodegen generate`，再 `xcodebuild -project DshDock.xcodeproj -scheme DshDock -configuration Debug build`。
-- 底层实际执行的是 `<binary> web --no-open --port <port> <extra>`；设置存在 `UserDefaults`（`dsh.binaryPath` / `dsh.extraArgs` / `dsh.port`）。
+- 底层实际执行的是 `<binary> web --no-open --port <port> <extra>`；设置存在 `UserDefaults`（`dsh.binaryPath` / `dsh.extraArgs` / `dsh.port` / `dsh.dshHome`）。
 - 详细设计：`docs/DESIGN.md`
