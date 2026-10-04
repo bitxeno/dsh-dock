@@ -24,11 +24,11 @@
 最终命令恒为：
 
 ```
-<binary> web --no-open --port <port> <extra...>
+<binary> [web | --profile <name>] --no-open --port <port> <extra...>
 ```
 
 - `binary`：设置页 `Binary Path`，默认 `dsh`（见 §4 解析）。
-- `web --no-open --port <port>`：由 App 写死注入，不允许用户编辑。`extra` 中若含 `--port/-p/--bind/--bind-address`，启动前 strip 并在日志 +（可选）toast 提示“已忽略命令中的端口，以端口字段为准”。
+- `[web | --profile <name>] --no-open --port <port>`：由 App 写死注入，不允许用户编辑。默认注 `web`（等价于 `--profile web`）；`extra` 中若显式给了 `--profile <name>`（`--profile x` / `--profile=x` 两种形态，多个取最后一个），摘出后替换 `web` 并挪到 app-args 之前——`--no-open/--port` 是 web 应用的选项，launcher 自家 flag 只认 `<name>` 之前的位置（实测：`dsh web … --profile x` 报 `unknown option '--profile'`，`dsh --no-open … --profile x` 报 `--profile <name> is required`）。缺值的残缺 `--profile` 丢弃；启动日志记一行"检测到自定义 --profile …：替换默认 web 子命令"。`extra` 中若含 `--port/-p/--bind/--bind-address`，启动前 strip 并在日志 +（可选）toast 提示"已忽略命令中的端口，以端口字段为准"。
 - `extra`：设置页 `Extra Args` 字符串，默认空。做 shell-like 切分（支持单/双引号、`\` 转义），不用幼稚 `split(" ")`。占位符提示 `例如：--verbose --data-dir "~/a b"`。
 - `port`：设置页数字字段，默认 `38811`，范围 `1–65535`。
 - 环境变量：设置页"高级选项"里的 `DSH_HOME`（默认空 = 启动不传，子进程环境保持

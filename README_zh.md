@@ -44,5 +44,5 @@ DshDock 是 macOS 上的 dsh 桌面应用。打开就能用，dsh 跑在独立�
 ## 开发者信息
 
 - 构建需要 Xcode 26 + `xcodegen`：`xcodegen generate`，再 `xcodebuild -project DshDock.xcodeproj -scheme DshDock -configuration Debug build`。
-- 底层实际执行的是 `<binary> web --no-open --port <port> <extra>`；设置存在 `UserDefaults`（`dsh.binaryPath` / `dsh.extraArgs` / `dsh.port` / `dsh.dshHome`）。
+- 底层实际执行的是 `<binary> [web | --profile <名称>] --no-open --port <port> <extra>`——Extra Args 里填 `--profile <名称>` 会替换默认的 `web`；设置存在 `UserDefaults`（`dsh.binaryPath` / `dsh.extraArgs` / `dsh.port` / `dsh.dshHome`）。
 - 详细设计：`docs/DESIGN.md`

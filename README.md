@@ -44,5 +44,5 @@ Most people can leave everything as-is.
 ## For developers
 
 - Building requires Xcode 26 + `xcodegen`: `xcodegen generate`, then build with `xcodebuild -project DshDock.xcodeproj -scheme DshDock -configuration Debug build`.
-- The app runs `<binary> web --no-open --port <port> <extra>` under the hood; settings are stored in `UserDefaults` (`dsh.binaryPath` / `dsh.extraArgs` / `dsh.port` / `dsh.dshHome`).
+- The app runs `<binary> [web | --profile <name>] --no-open --port <port> <extra>` under the hood — putting `--profile <name>` in Extra Args replaces the default `web`; settings are stored in `UserDefaults` (`dsh.binaryPath` / `dsh.extraArgs` / `dsh.port` / `dsh.dshHome`).
 - Design details (in Chinese): `docs/DESIGN.md`

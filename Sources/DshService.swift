@@ -40,6 +40,8 @@ final class DshService: NSObject {
     private var currentConfig: DshConfig?
     private var currentLaunch: ResolvedLaunch?
     private var currentCleanedExtra: [String] = []
+    /// extra 里摘出的 `--profile <name>`（空 = 用默认 `web`，见 `injectedHead`）。
+    private var currentProfileArgs: [String] = []
     private var strippedArgs: [String] = []
 
     var onStateChange: ((State) -> Void)?
@@ -92,11 +94,19 @@ final class DshService: NSObject {
         }
     }
 
+    /// App 注入的 launcher 段：默认 `web`；extra 里显式给了 `--profile` 时由它替换，
+    /// 且必须排在 app-args（`--no-open/--port` 是 web 应用的选项）之前（实测踩坑，
+    /// 见 ShellSplit.extractProfileArgs 注释）。
+    private func injectedHead(port: Int) -> [String] {
+        (currentProfileArgs.isEmpty ? ["web"] : currentProfileArgs)
+            + ["--no-open", "--port", String(port)]
+    }
+
     func diagnosticCommand() -> String {
         guard let cfg = currentConfig, let launch = currentLaunch else { return "" }
         var parts: [String] = [launch.executableURL.path]
         parts += launch.prefixArgs
-        parts += ["web", "--no-open", "--port", String(cfg.port)]
+        parts += injectedHead(port: cfg.port)
         parts += currentCleanedExtra
         let cmd = shellJoin(parts)
         return cfg.dshHome.isEmpty ? cmd : "DSH_HOME=\(shellEscape(cfg.dshHome)) \(cmd)"
@@ -149,18 +159,24 @@ final class DshService: NSObject {
         }
         currentLaunch = launch
 
-        // 2) 切分 extra 并 strip App 拥有的参数
+        // 2) 切分 extra：先摘 launcher 级 --profile（替换默认 web），再 strip App 拥有的
+        //    app-args（web/--no-open/--port 等）。
         let rawExtra = shellSplit(config.extraArgs)
-        let (cleaned, stripped) = stripOwnedArgs(rawExtra)
+        let (profileArgs, withoutProfile) = extractProfileArgs(rawExtra)
+        let (cleaned, stripped) = stripOwnedArgs(withoutProfile)
         currentCleanedExtra = cleaned
+        currentProfileArgs = profileArgs
         strippedArgs = stripped
 
         // 3) 先把本次启动的命令写进日志（必须在 TCP 预检之前——错误页"详情"读的就是
         //    这份环 buffer，不留一行就永远是空的，实测踩过）。
         log.header("启动 \(launch.displayName)")
         let diag: [String] = [launch.executableURL.path] + launch.prefixArgs
-            + ["web", "--no-open", "--port", String(config.port)] + cleaned
+            + injectedHead(port: config.port) + cleaned
         log.append("$ " + shellJoin(diag))
+        if !profileArgs.isEmpty {
+            log.append("检测到自定义 \(shellJoin(profileArgs))：替换默认 web 子命令。")
+        }
         if !stripped.isEmpty {
             log.append("提示：已忽略命令中的自带参数（以端口字段为准）：\(stripped.joined(separator: " "))")
         }
@@ -178,7 +194,7 @@ final class DshService: NSObject {
         // 5) 组装 Process
         let proc = Process()
         proc.executableURL = launch.executableURL
-        proc.arguments = launch.prefixArgs + ["web", "--no-open", "--port", String(config.port)] + cleaned
+        proc.arguments = launch.prefixArgs + injectedHead(port: config.port) + cleaned
         proc.currentDirectoryURL = FileManager.default.homeDirectoryForCurrentUser
         // PATH 多来源合并去重，不依赖单一来源（实测踩坑）：brew shellenv 配在
         // .zshrc（交互式）而非 .zprofile 的机器上，Finder 双击下 zsh -l -c 拿到的
