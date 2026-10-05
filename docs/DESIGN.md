@@ -292,9 +292,10 @@ Sources/
   LogStore.swift            # 文件轮转 + 环 buffer
   DshService.swift          # Process 管家 + TCP 预检 + 就绪轮询 + restart
   MainWindowController.swift# NSWindow + WKWebView + 标题栏 accessory + loading 视图（错误/状态页在 StatusViewController）
-  NotifyBridge.swift          # 系统通知原生桥：Notification/SW shim + UNUserNotificationCenter（见 §9-A）
-  NotchToast.swift            # 刘海悬窗通知小引擎：SwiftUI 黑胶囊 + NSPanel（见 §9-A）
-  NotifySettingsViewController.swift # 标题栏铃铛弹层：notch/system 二选（见 §9-B）
+  NotchToast/               # 通知模块（见 §9-A/§9-B）
+    NotifyBridge.swift        # 通知原生桥：Notification/SW shim + 后端路由
+    NotchToast.swift          # 刘海悬窗小引擎：SwiftUI 黑胶囊 + NSPanel
+    NotifySettingsViewController.swift # 标题栏铃铛弹层：notch/system 二选
   StatusViewController.swift # 错误/状态页（Chrome 断网页式全页布局）：详情展开日志 + 打开日志文件；重试 / 端口占用时强制结束并重启
   SettingsViewController.swift # popover 表单 + 校验 + Apply&Restart
 Info.plist                  # NSAllowsLocalNetworking 等
