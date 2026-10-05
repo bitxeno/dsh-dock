@@ -66,6 +66,7 @@ brew install --cask bitxeno/tap/dshdock
 
 - **重启按钮**（标题栏 ↻）：页面卡住或空白时点它。
 - **设置按钮**（标题栏齿轮）：一般不用管。
+- **通知按钮**（标题栏铃铛）：刘海悬窗（默认，无需系统授权）或系统通知。
 - 跳往外部页面的链接会自动用默认浏览器打开。
 
 ## 设置
@@ -85,5 +86,5 @@ brew install --cask bitxeno/tap/dshdock
 ## 开发
 
 - 构建需要 Xcode 26 + `xcodegen`：`xcodegen generate`，再 `xcodebuild -project DshDock.xcodeproj -scheme DshDock -configuration Debug build`。
-- 底层实际执行的是 `<binary> [web | --profile <名称>] --no-open --port <port> <extra>`——Extra Args 里填 `--profile <名称>` 会替换默认的 `web`；设置存在 `UserDefaults`（`dsh.binaryPath` / `dsh.extraArgs` / `dsh.port` / `dsh.dshHome`）。
+- 底层实际执行的是 `<binary> [web | --profile <名称>] --no-open --port <port> <extra>`——Extra Args 里填 `--profile <名称>` 会替换默认的 `web`；设置存在 `UserDefaults`（`dsh.binaryPath` / `dsh.extraArgs` / `dsh.port` / `dsh.dshHome`，另有应用级 `app.interceptPluginRestart` / `app.notifyBackend` 默认 `notch`）。
 - 详细设计：`docs/DESIGN.md`

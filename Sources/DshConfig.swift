@@ -3,6 +3,7 @@ import Foundation
 /// App 级偏好（区别于 dsh 启动三元组，不进设置表单、不随 onApply 保存）。
 enum AppPreferences {
     private static let kInterceptRestart = "app.interceptPluginRestart"
+    private static let kNotifyBackend = "app.notifyBackend"
 
     /// 插件"立即重启"是否由 App 接管（默认开）。关闭后放行真实请求，
     /// 由 dsh-market 自带的 detached 助手重启（App 侧会看到进程意外退出）。
@@ -10,6 +11,40 @@ enum AppPreferences {
         get { UserDefaults.standard.object(forKey: kInterceptRestart) as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: kInterceptRestart) }
     }
+
+    /// 通知后端：notch = 刘海悬窗（默认，免系统授权），system = 原生通知中心。
+    static var notifyBackend: NotifyBackend {
+        get {
+            let raw = UserDefaults.standard.string(forKey: kNotifyBackend) ?? NotifyBackend.notch.rawValue
+            return NotifyBackend(rawValue: raw) ?? .notch
+        }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: kNotifyBackend) }
+    }
+}
+
+/// 通知后端（存 UserDefaults `app.notifyBackend`，默认 notch）。
+enum NotifyBackend: String, CaseIterable {
+    case notch
+    case system
+
+    var title: String {
+        switch self {
+        case .notch: return "刘海悬窗"
+        case .system: return "系统通知"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .notch: return "屏幕顶部悬窗呈现，无需系统授权（默认）"
+        case .system: return "走通知中心，可留底、可点按钮裁决"
+        }
+    }
+
+    /// 是否经过 UNUserNotificationCenter（涉及系统授权弹窗）。
+    var usesSystemCenter: Bool { self == .system }
+    /// 是否点亮刘海悬窗。
+    var usesNotch: Bool { self == .notch }
 }
 
 /// 设置模型：Binary Path + Extra Args + Port + DSH_HOME（高级，默认收起；Q3/Q21）。

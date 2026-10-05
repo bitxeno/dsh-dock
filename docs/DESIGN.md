@@ -223,6 +223,35 @@
   否则 App 在前台时一条通知都看不到；带按钮的通知走预注册 category
   `dshDockNotify.approval`，按钮标题随插件语言变（同意/拒绝、Approve/Reject），
   所以每次投递前按当前文案重注册一次。
+- **后端可配置（`app.notifyBackend`，默认 `notch`）**：`notch` = 自研 `NotchToast` 悬窗
+  （免系统授权，开箱即用）；`system` = 上述原生链路。视觉与动效对齐 DynamicNotch：
+  纯黑底 + 白 20% 描边 2pt、顶边全宽平直贴住菜单栏（粘连感即来自此形状 +
+  面板 y 零缝隙）、底部大圆角（随高度 `base = min(h/3, 16)`，上小下大）、
+  标题 14 semibold / 描述 11 medium 白 55%、按钮全宽 35 高胶囊
+  （第一灰底白字、第二蓝底蓝字，按压缩小 0.94 + 变暗）；进场为整体插入转场
+  （scale 0.85 锚点顶部 + 淡入 + 上位移 h/2，
+  `interactiveSpring(0.5 / extraBounce 0.25)`，底和内容一起动以避免错位）
+  + 窗口层 0.22s 淡入，退出 0.18s 淡出；内容层另套小一圈的形状 mask
+  带按钮的待审批常驻（不对齐旧 8s），直到用户点按钮裁决、
+  点正文（关窗 + 抬窗回会话）或页面发 close；常驻期间来的纯文本照常显示，
+  消失后把审批请回来（暂存恢复，用户操作前不丢失）；
+  同 tag 进新条前先 dismiss 旧条；`NSPanel(.borderless,.nonactivatingPanel)` +
+     `level=.statusBar+2` + `canJoinAllSpaces`。dismiss 淡出后销毁 panel，下次重建
+  （复用旧 panel 时 SwiftUI 插入转场偶发不播，实测踩过）。锚定屏优先跟 App 主窗口所在屏
+  （多屏下跟鼠标屏会出现"显示了但用户在看另一块屏"，实测踩过），其次鼠标屏。形状与按钮样式为参照其
+  NotchShape / PrimaryButtonStyle 的重实现（同 GPL-3.0），不要它的引擎、
+  设置流、手势与私有 API。notch 下免系统授权：`query`/`request` 直接报
+  `granted`（否则插件 `canToast()` 恒 false），永不弹窗；
+  切回 system 才重新查询真实授权。切换经标题栏铃铛弹层即时生效，无需重启服务。
+  已知边界：悬窗是 App 内窗口，App 隐藏/最小化时不可见，纯后台提醒仍靠系统侧
+  （需要后台到达请切 system）；整窗点按反馈与滑动手势未搬（按钮级按压有）。
+
+## 9-B. 通知设置入口
+
+- 标题栏 accessory 由 3 钮扩为 4 钮（总宽 98→130）：`[重启 34][接管 30][通知 30][设置 30]`，
+  仍显式 frame、总高 ≤28pt。铃铛按钮弹 `NotifySettingsViewController`
+  （`notch/system` 二选 radio + 说明，transient，点外关闭），`onChange` 即写
+  `AppPreferences.notifyBackend` 并调 `NotifyBridge.backendDidChange()`。
 
 ## 10. 窗口与生命周期
 
@@ -244,7 +273,9 @@
   `dsh.port: Int = 38811`，`dsh.dshHome: String = ""`（"高级选项"里的 `DSH_HOME`，
   空 = 启动不注入该变量）。键名稳定，不迁移；`workingDirectory` 仍是 V2 预留。
 - App 级偏好（`AppPreferences`，与 dsh 启动三元组分键、不进设置表单）：
-  `app.interceptPluginRestart: Bool = true`（插件"立即重启"由 App 接管，见 §9/§8）。
+  `app.interceptPluginRestart: Bool = true`（插件"立即重启"由 App 接管，见 §9/§8）；
+  `app.notifyBackend: String = "notch"`（通知后端 notch/system，见 §9-A/§9-B，
+  标题栏铃铛弹层切换，即时生效）。
 - 校验：port 越界、二进制不可执行（`isExecutableFile`）在 Apply 时拦截。
 
 ## 12. 源码结构（实施约）
@@ -262,6 +293,8 @@ Sources/
   DshService.swift          # Process 管家 + TCP 预检 + 就绪轮询 + restart
   MainWindowController.swift# NSWindow + WKWebView + 标题栏 accessory + loading 视图（错误/状态页在 StatusViewController）
   NotifyBridge.swift          # 系统通知原生桥：Notification/SW shim + UNUserNotificationCenter（见 §9-A）
+  NotchToast.swift            # 刘海悬窗通知小引擎：SwiftUI 黑胶囊 + NSPanel（见 §9-A）
+  NotifySettingsViewController.swift # 标题栏铃铛弹层：notch/system 二选（见 §9-B）
   StatusViewController.swift # 错误/状态页（Chrome 断网页式全页布局）：详情展开日志 + 打开日志文件；重试 / 端口占用时强制结束并重启
   SettingsViewController.swift # popover 表单 + 校验 + Apply&Restart
 Info.plist                  # NSAllowsLocalNetworking 等

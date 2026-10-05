@@ -9,6 +9,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, WKNaviga
     private var restartButton: NSButton!
     private var restartSpinner: NSProgressIndicator!
     private var interceptButton: NSButton!
+    private var notifyButton: NSButton!
     private var settingsButton: NSButton!
     private var loadingView: NSView!
     private var loadingLabel: NSTextField!
@@ -92,8 +93,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, WKNaviga
     /// 注意：accessory 视图不参与窗口级自动布局，一律用显式 frame（NSStackView
     /// 在这里会被压成 0 宽）；且总高不得超过标题栏 28pt，否则反而撑高标题栏。
     private func setupTitlebar(win: NSWindow) {
-        // 布局（总 98x28）：[重启 34][接管开关 30][设置 30]，按钮 30x24 上下各留 2pt。
-        let bar = NSView(frame: NSRect(x: 0, y: 0, width: 98, height: 28))
+        // 布局（总 130x28）：[重启 34][接管开关 30][通知 30][设置 30]，按钮 30x24 上下各留 2pt。
+        let bar = NSView(frame: NSRect(x: 0, y: 0, width: 130, height: 28))
 
         restartContainer = NSView(frame: NSRect(x: 0, y: 0, width: 34, height: 28))
         bar.addSubview(restartContainer)
@@ -132,8 +133,18 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, WKNaviga
         settingsButton.isBordered = false
         settingsButton.imagePosition = .imageOnly
         settingsButton.setAccessibilityLabel("设置")
-        settingsButton.frame = NSRect(x: 68, y: 2, width: 30, height: 24)
+        settingsButton.frame = NSRect(x: 100, y: 2, width: 30, height: 24)
         bar.addSubview(settingsButton)
+
+        notifyButton = NSButton(
+            image: NSImage(systemSymbolName: "bell", accessibilityDescription: "通知方式") ?? NSImage(),
+            target: self, action: #selector(didTapNotifySettings))
+        notifyButton.toolTip = "通知方式"
+        notifyButton.isBordered = false
+        notifyButton.imagePosition = .imageOnly
+        notifyButton.setAccessibilityLabel("通知方式")
+        notifyButton.frame = NSRect(x: 68, y: 2, width: 30, height: 24)
+        bar.addSubview(notifyButton)
 
         let accessory = NSTitlebarAccessoryViewController()
         accessory.view = bar
@@ -467,6 +478,24 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, WKNaviga
         self.popover = pop
         pop.show(relativeTo: interceptButton.bounds,
                  of: interceptButton, preferredEdge: .minY)
+    }
+
+    /// 通知方式弹层：notch/system 二选一，切换即时生效（无需重启服务）。
+    @objc private func didTapNotifySettings() {
+        if popover != nil { return }
+        let vc = NotifySettingsViewController(selected: AppPreferences.notifyBackend)
+        vc.onChange = { backend in
+            AppPreferences.notifyBackend = backend
+            NSLog("[DshDock] 通知后端切换为：%@", backend.rawValue)
+            NotifyBridge.shared.backendDidChange()
+        }
+        let pop = NSPopover()
+        pop.contentViewController = vc
+        pop.behavior = .transient
+        pop.delegate = self
+        self.popover = pop
+        pop.show(relativeTo: notifyButton.bounds,
+                 of: notifyButton, preferredEdge: .minY)
     }
 
     @objc func reloadWebView() {

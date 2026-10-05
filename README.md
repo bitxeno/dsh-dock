@@ -66,6 +66,7 @@ Just open the app — everything starts automatically.
 
 - **Restart button** (↻ in the title bar): click it if the page freezes or goes blank.
 - **Settings button** (gear in the title bar): you normally never need to touch this.
+- **Notification button** (bell in the title bar): notch overlay (default, no system permission needed) or system notifications.
 - Links to outside pages open in your default browser.
 
 ## Settings
@@ -85,5 +86,5 @@ Most people can leave everything as-is.
 ## Development
 
 - Building requires Xcode 26 + `xcodegen`: `xcodegen generate`, then build with `xcodebuild -project DshDock.xcodeproj -scheme DshDock -configuration Debug build`.
-- The app runs `<binary> [web | --profile <name>] --no-open --port <port> <extra>` under the hood — putting `--profile <name>` in Extra Args replaces the default `web`; settings are stored in `UserDefaults` (`dsh.binaryPath` / `dsh.extraArgs` / `dsh.port` / `dsh.dshHome`).
+- The app runs `<binary> [web | --profile <name>] --no-open --port <port> <extra>` under the hood — putting `--profile <name>` in Extra Args replaces the default `web`; settings are stored in `UserDefaults` (`dsh.binaryPath` / `dsh.extraArgs` / `dsh.port` / `dsh.dshHome`, plus app-level `app.interceptPluginRestart` / `app.notifyBackend` default `notch`).
 - Design details (in Chinese): `docs/DESIGN.md`

@@ -49,6 +49,12 @@ final class NotifyBridge: NSObject, WKScriptMessageHandler, UNUserNotificationCe
         refreshPermission()
     }
 
+    /// 后端切换后即时生效：notch 下不再读系统授权，直接报 granted；
+    /// 切回 system 则重新查询真实状态。
+    func backendDidChange() {
+        refreshPermission()
+    }
+
     func attach(webView: WKWebView) {
         self.webView = webView
         syncPermissionToPage()
@@ -65,6 +71,12 @@ final class NotifyBridge: NSObject, WKScriptMessageHandler, UNUserNotificationCe
     /// 就再问一次；一旦用户做了决定，macOS 自己会记住、后续 `requestAuthorization`
     /// 直接回结果而不弹窗，不需要我们额外挡。
     private func requestAuthorization() {
+        // notch-only：悬窗无需系统授权，直接视为 granted，永不弹窗。
+        guard AppPreferences.notifyBackend.usesSystemCenter else {
+            NSLog("[DshDock] 通知后端为刘海悬窗，跳过系统授权，直接 granted")
+            setPermission(.granted)
+            return
+        }
         center.requestAuthorization(options: [.alert, .badge, .sound]) { [weak self] granted, error in
             DispatchQueue.main.async {
                 if let error { NSLog("[DshDock] 通知授权失败：\(error.localizedDescription)") }
@@ -75,6 +87,13 @@ final class NotifyBridge: NSObject, WKScriptMessageHandler, UNUserNotificationCe
     }
 
     private func refreshPermission() {
+        // notch-only：不读系统状态（读出来默认是 notDetermined/denied，
+        // 会让插件误判无权限），直接报 granted 让 canToast() 放行。
+        guard AppPreferences.notifyBackend.usesSystemCenter else {
+            NSLog("[DshDock] 通知后端为刘海悬窗，permission 直接 granted")
+            DispatchQueue.main.async { [weak self] in self?.setPermission(.granted) }
+            return
+        }
         center.getNotificationSettings { [weak self] settings in
             let mapped = Self.map(status: settings.authorizationStatus)
             NSLog("[DshDock] 通知权限状态：raw=%d → %@ (alert=%d, badge=%d, sound=%d)",
@@ -117,6 +136,8 @@ final class NotifyBridge: NSObject, WKScriptMessageHandler, UNUserNotificationCe
         case "close":
             if let id = body["id"] as? String {
                 removeDelivered(identifiers: [id], tag: body["tag"] as? String)
+                NotchToastManager.shared.dismiss(id: id)
+                NotchToastManager.shared.dropParked(id: id)
             }
         case "request":
             requestAuthorization()
@@ -135,25 +156,58 @@ final class NotifyBridge: NSObject, WKScriptMessageHandler, UNUserNotificationCe
         let title = body["title"] as? String ?? ""
         let bodyText = body["body"] as? String ?? ""
         let actions = body["actions"] as? [[String: String]] ?? []
+        let key = body["key"] as? String ?? ""
+        let sessionId = body["sessionId"] as? String ?? ""
+        let focus = (body["focus"] as? Bool) ?? true
+        let backend = AppPreferences.notifyBackend
 
         // 同 tag 顶掉上一条：插件按 tag 复用一条通知（renotify）。
         if !tag.isEmpty, let olds = tagToIds[tag], !olds.isEmpty {
             center.removeDeliveredNotifications(withIdentifiers: olds)
+            for old in olds { NotchToastManager.shared.dismiss(id: old) }
         }
         tagToIds[tag] = [id]
 
+        let userInfo: [AnyHashable: Any] = [
+            "id": id,
+            "tag": tag,
+            "key": key,
+            "sessionId": sessionId,
+            "focus": focus,
+        ]
+
+        if backend.usesNotch {
+            let toastActions: [NotchToastAction] = actions.compactMap { item in
+                guard let identifier = item["action"], !identifier.isEmpty else { return nil }
+                return NotchToastAction(identifier: identifier, title: item["title"] ?? identifier)
+            }
+            // 刘海侧的点击语义与系统侧对齐：点正文抬窗 + 回灌空 action，
+            // 点按钮只回灌不抬窗（插件语义：裁决不该把窗口拽上来）。
+            NotchToastManager.shared.show(
+                id: id, tag: tag, title: title, body: bodyText, actions: toastActions,
+                onBodyClick: { [weak self] in
+                    if focus { self?.raiseWindow() }
+                    self?.removeDelivered(identifiers: [id], tag: tag.isEmpty ? nil : tag)
+                    DispatchQueue.main.async { [weak self] in
+                        self?.dispatchToPage(action: "", info: userInfo, navigate: focus)
+                    }
+                },
+                onAction: { [weak self] identifier in
+                    self?.removeDelivered(identifiers: [id], tag: tag.isEmpty ? nil : tag)
+                    DispatchQueue.main.async { [weak self] in
+                        self?.dispatchToPage(action: identifier, info: userInfo, navigate: focus)
+                    }
+                }
+            )
+        }
+
+        guard backend.usesSystemCenter else { return }
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = bodyText
         // 提示音由插件自己的 WebAudio 播（插件传了 silent:true），原生不要再叠一声。
         content.sound = nil
-        content.userInfo = [
-            "id": id,
-            "tag": tag,
-            "key": body["key"] as? String ?? "",
-            "sessionId": body["sessionId"] as? String ?? "",
-            "focus": (body["focus"] as? Bool) ?? true,
-        ]
+        content.userInfo = userInfo
         if !actions.isEmpty {
             registerApprovalCategory(actions: actions)
             content.categoryIdentifier = Self.approvalCategory
@@ -212,6 +266,7 @@ final class NotifyBridge: NSObject, WKScriptMessageHandler, UNUserNotificationCe
         let tag = info["tag"] as? String ?? ""
         if let id = info["id"] as? String {
             removeDelivered(identifiers: [id], tag: tag.isEmpty ? nil : tag)
+            NotchToastManager.shared.dismiss(id: id)
         }
         // 点正文 = "带我去那儿"，顺势把窗口抬到前台；点按钮不抬窗（插件语义：
         // 裁决不该把窗口拽上来）。autoFocus 关掉时插件传 focus:false，两边都不动。
