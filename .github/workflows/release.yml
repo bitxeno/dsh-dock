@@ -2,10 +2,20 @@ name: Release
 
 # 推 v* 标签自动构建打包发布；也可在 Actions 页手动触发（生成 dev 版本号）。
 # 产物：通用二进制 DMG + SHA256 校验和 + Homebrew cask 文件（附在 Release 里）。
+#
+# Release notes 顺序（同 simlet-cli）：changelogithub 自上个 tag 起的
+# conventional commits 分组打头 → 安装块附后 → GitHub 自动生成的
+# What's Changed 垫底（指定 body 时 API 会把 body 前置到自动 notes 之前，
+# 所以 softprops 那里不能再设 append_body: true）。
+# changelogithub 是 node 工具，macos runner 自带 node，直接 npx 拉起即可。
+#
 # 可选：配置 secrets HOMEBREW_TAP_REPO（如 bitxeno/homebrew-tap）与
 # HOMEBREW_TAP_TOKEN（对该 tap 仓库有 contents:write 的 PAT），会自动把
 # cask 推到 tap 仓库，用户即可 `brew install --cask bitxeno/tap/dshdock`。
-on:
+#
+# 注意 `"on":` 加引号是刻意的：YAML 1.1 会把裸 `on` 解析成布尔 true，工具回写
+# 文件时容易把它改写成 `true:`，那样 push tag 就再也不会触发了。
+"on":
   push:
     tags:
       - "v*"
@@ -23,6 +33,9 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # changelogithub 要读上个 tag 起的完整历史，浅克隆会断代。
+          fetch-depth: 0
 
       - name: Derive version
         run: |
@@ -111,12 +124,56 @@ jobs:
           RUBY
           ruby -c dshdock.rb
 
+      # Release notes 由 changelogithub 从 conventional commits 生成
+      #（与 simlet-cli 同款；from 指向上个 tag，首版无 tag 时全量生成；
+      # 默认类型配置会略过 docs/ci/chore/test）。
+      - name: Generate the release notes with changelogithub
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          PREV="$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || true)"
+          if [ -z "$PREV" ]; then
+            npx --yes changelogithub --output "$RUNNER_TEMP/CHANGELOG.md"
+          else
+            npx --yes changelogithub --from "$PREV" --output "$RUNNER_TEMP/CHANGELOG.md"
+          fi
+          cat "$RUNNER_TEMP/CHANGELOG.md"
+
+      # 安装块附在 changelog 之后：changelogithub 注记打头讲本版变化，
+      # 安装说明垫底方便跟着装；What's Changed 由 softprops 的
+      # generate_release_notes 追加在最后。
+      - name: Append install instructions
+        run: |
+          {
+            cat "$RUNNER_TEMP/CHANGELOG.md"
+            echo ""
+            echo ""
+            echo "## 安装"
+            echo ""
+            echo '```bash'
+            echo "brew install --cask bitxeno/tap/dshdock"
+            echo '```'
+            echo ""
+            echo "升级："
+            echo ""
+            echo '```bash'
+            echo "brew upgrade --cask dshdock"
+            echo '```'
+            echo ""
+            echo "也可以直接下载下面的 \`DshDock-$VERSION.dmg\`，挂载后把"
+            echo "\`DshDock.app\` 拖进 \`/Applications\`。构建未做公证（ad-hoc 签名），"
+            echo "首次启动若被 Gatekeeper 拦截：右键 App 选“打开”，或执行"
+            echo '  xattr -dr com.apple.quarantine /Applications/DshDock.app'
+            echo "（经 Homebrew 安装会自动去隔离）。"
+          } > "$RUNNER_TEMP/NOTES.md"
+
       - name: Create release and upload artifacts
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.VERSION }}
           fail_on_unmatched_files: true
           generate_release_notes: true
+          body_path: ${{ runner.temp }}/NOTES.md
           files: |
             dist/DshDock-${{ env.VERSION }}.dmg
             dist/checksums.txt

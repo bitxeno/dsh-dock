@@ -348,7 +348,10 @@ open ~/Library/Developer/Xcode/DerivedData/.../DshDock.app  # 或 Finder 双击�
   随签名封存；严禁签名后用 PlistBuddy 改包内 Info.plist——破坏签名后 macOS
   判定为篡改，其子进程被沙盒限制加载外部卷 dylib，实测）
   → hdiutil 打 DMG → SHA256 → 生成 cask（头注释按 `brew style` 要求：typed 在前、
-  strict、desc 不含平台名）→ GitHub Release 附 DMG/checksums/cask。可选 secrets
+  strict、desc 不含平台名）→ GitHub Release 附 DMG/checksums/cask。
+  Release notes = changelogithub（自上个 tag 起 conventional commits 分组，
+  checkout 须 `fetch-depth: 0`）＋ 安装块（cask 安装/升级/直连 DMG 去隔离）＋
+  GitHub 自动 What's Changed（body 前置，见 release.yml 头注释）。可选 secrets
   `HOMEBREW_TAP_REPO`+`HOMEBREW_TAP_TOKEN` 自动把 cask 推到 tap 仓库，用户
   `brew install --cask <owner>/tap/dshdock`；未配则 cask 附在 Release 资产里手动拷。
   cask 带 `postflight_steps` 钩子装完自动 `xattr -dr com.apple.quarantine`——brew
