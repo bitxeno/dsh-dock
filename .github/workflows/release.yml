@@ -159,12 +159,6 @@ jobs:
             echo '```bash'
             echo "brew upgrade --cask dshdock"
             echo '```'
-            echo ""
-            echo "也可以直接下载下面的 \`DshDock-$VERSION.dmg\`，挂载后把"
-            echo "\`DshDock.app\` 拖进 \`/Applications\`。构建未做公证（ad-hoc 签名），"
-            echo "首次启动若被 Gatekeeper 拦截：右键 App 选“打开”，或执行"
-            echo '  xattr -dr com.apple.quarantine /Applications/DshDock.app'
-            echo "（经 Homebrew 安装会自动去隔离）。"
           } > "$RUNNER_TEMP/NOTES.md"
 
       - name: Create release and upload artifacts
