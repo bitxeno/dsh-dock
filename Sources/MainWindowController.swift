@@ -21,6 +21,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, WKNaviga
     private var config = DshConfig.load()
     private var popover: NSPopover?
     private var bootTask: Task<Void, Never>?
+    private var memMonitor: WebContentMonitor?
+    /// 进程终止恢复页的重试标记：此时服务活着，重试只重建页面、不走 boot（不换 token）。
+    private var contentTerminated = false
 
     // MARK: - init
 
@@ -57,19 +60,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, WKNaviga
         guard let content = win.contentView else { return }
         content.wantsLayer = true
 
-        let wkConfig = WKWebViewConfiguration()
-        wkConfig.websiteDataStore = .default()
-        // 本地明文由 Info.plist NSAllowsLocalNetworking 放行
-        webView = WKWebView(frame: .zero, configuration: wkConfig)
-        webView.navigationDelegate = self
-        webView.uiDelegate = self
-        webView.translatesAutoresizingMaskIntoConstraints = false
+        webView = makeWebView()
         content.addSubview(webView)
-        // 插件重启接管：钩子按偏好注入（默认开），消息名 dshDockRestart → didTapRestart。
-        wkConfig.userContentController.add(self, name: "dshDockRestart")
-        // 系统通知桥：WKWebView 没有 Notification / Service Worker，插件（dsh-notify-me）
-        // 只靠浏览器 API 发通知，在壳里整条链路是死的，用原生桥顶上。
-        wkConfig.userContentController.add(NotifyBridge.shared, name: NotifyBridge.messageName)
         // fullSizeContentView 下内容会伸到透明标题栏底下，顶部按标题栏高度避让。
         webTopConstraint = webView.topAnchor.constraint(equalTo: content.topAnchor)
         webTopConstraint.isActive = true
@@ -86,6 +78,29 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, WKNaviga
         buildStatusView(into: content)
 
         setupTitlebar(win: win)
+    }
+
+    /// WebView 工厂：初始创建与内存重建共用。红线——
+    /// dataStore 必须是 persistent `.default()`（保 cookie 登录态，别换 ephemeral）。
+    /// 注意：不再显式新建 `WKProcessPool`——macOS 12+ 上多实例已无任何效果（deprecated）；
+    /// 重建的释放靠销毁 WebView 本体：页面关闭即放掉 DOM/JS，且本 App 的 WebProcessCache
+    /// 是禁用的（日志 `WebProcessCache::updateCapacity: Cache is disabled`），闲置的
+    /// 老进程会退出；哨兵每次按当前 WebView 重取 PID 验证效果，万一复用导致没降下来，
+    /// 会走 escalate 转人工，绝不循环重建。
+    private func makeWebView() -> WKWebView {
+        let wkConfig = WKWebViewConfiguration()
+        wkConfig.websiteDataStore = .default()
+        // 本地明文由 Info.plist NSAllowsLocalNetworking 放行
+        let wv = WKWebView(frame: .zero, configuration: wkConfig)
+        wv.navigationDelegate = self
+        wv.uiDelegate = self
+        wv.translatesAutoresizingMaskIntoConstraints = false
+        // 插件重启接管：钩子按偏好注入（默认开），消息名 dshDockRestart → didTapRestart。
+        wkConfig.userContentController.add(self, name: "dshDockRestart")
+        // 系统通知桥：WKWebView 没有 Notification / Service Worker，插件（dsh-notify-me）
+        // 只靠浏览器 API 发通知，在壳里整条链路是死的，用原生桥顶上。
+        wkConfig.userContentController.add(NotifyBridge.shared, name: NotifyBridge.messageName)
+        return wv
     }
 
     /// 标题栏：交通灯居左（系统），重启/设置以 accessory 嵌在标题栏右侧。
@@ -284,6 +299,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, WKNaviga
                 await MainActor.run {
                     self.hideOverlays()
                     self.loadServiceURL()
+                    self.startMemoryWatchdog()
                 }
             } catch let e as DshLaunchError {
                 guard !Task.isCancelled else { return }
@@ -409,6 +425,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, WKNaviga
     // MARK: - actions
 
     @objc private func didTapRetry() {
+        // 进程终止恢复页：服务还活着，只重建页面（不换 token、不重启服务）。
+        if contentTerminated {
+            contentTerminated = false
+            recreateWebView(logReason: "用户从进程终止页恢复", loadingText: "正在恢复页面…")
+            return
+        }
         boot()
     }
 
@@ -424,6 +446,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, WKNaviga
                     self.setRestartingUI(false)
                     self.hideOverlays()
                     self.loadServiceURL()
+                    self.startMemoryWatchdog()
                 }
             } catch let e as DshLaunchError {
                 await MainActor.run {
@@ -502,8 +525,129 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, WKNaviga
         webView.reload()
     }
 
+    // MARK: - 内存哨兵接线
+
+    /// 服务就绪后开哨兵（幂等）。PID 在首次加载后才有，拿不到时只观察不动手。
+    private func startMemoryWatchdog() {
+        if memMonitor == nil {
+            let m = WebContentMonitor()
+            m.onEvent = { [weak self] e in self?.handleMemoryEvent(e) }
+            memMonitor = m
+        }
+        memMonitor?.start { [weak self] in
+            guard let wv = self?.webView else { return nil }
+            return WebContentMonitor.webContentPID(of: wv)
+        }
+    }
+
+    private func handleMemoryEvent(_ event: WebContentMonitor.Event) {
+        switch event {
+        case .warn(let b):
+            // 隐藏时只记日志（回来后若继续涨，act 会再报）；看得见才打扰用户。
+            guard isPageVisibleToUser() else {
+                NSLog("[DshDock] 内存哨兵 warn（%@ GB），窗口隐藏中，只记日志",
+                      WebContentMonitor.gbString(b))
+                return
+            }
+            presentMemoryAlert(footprint: b, title: "页面内存偏高", escalated: false)
+        case .act(let b):
+            guard service.state == .running else {
+                NSLog("[DshDock] 内存哨兵 act（%@ GB），服务不在 running，跳过",
+                      WebContentMonitor.gbString(b))
+                return
+            }
+            if isPageVisibleToUser() {
+                presentMemoryAlert(footprint: b, title: "页面内存过高", escalated: false)
+            } else {
+                recreateWebView(
+                    logReason: "哨兵 act（\(WebContentMonitor.gbString(b)) GB），窗口隐藏中自动重建",
+                    loadingText: "页面内存偏高，正在重建释放…")
+            }
+        case .escalate(let b):
+            // 冷却内再次超标：重建也压不住，不循环，人工介入。
+            guard isPageVisibleToUser() else {
+                NSLog("[DshDock] 内存哨兵 escalate（%@ GB），窗口隐藏中，只记日志",
+                      WebContentMonitor.gbString(b))
+                return
+            }
+            presentMemoryAlert(footprint: b, title: "页面内存反复超标", escalated: true)
+        }
+    }
+
+    /// 用户是否正看着页面：窗口可见 + App 活跃 + 未被完全遮挡。
+    /// 自动动手只敢在 false 时做，绝不在生成中掀桌子。
+    private func isPageVisibleToUser() -> Bool {
+        guard let win = window else { return false }
+        return win.isVisible && NSApp.isActive && win.occlusionState.contains(.visible)
+    }
+
+    private func presentMemoryAlert(footprint: UInt64, title: String, escalated: Bool) {
+        let gb = WebContentMonitor.gbString(footprint)
+        NSLog("[DshDock] 内存哨兵提示（%@ GB）：%@", gb, title)
+        guard let win = window, win.isVisible else {
+            NSLog("[DshDock] 窗口不可见，内存提示只记日志")
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = "\(title)（\(gb) GB）"
+        alert.informativeText = escalated
+            ? "重建后短时间内再次超标，可能是当前会话太大（大日志/长轨迹/持续生成）。建议先拆小会话或停止生成，再点重建——否则还会涨回去。"
+            : "放任不管可能拖慢整机。重建页面会释放内存并重新加载当前服务，登录态保留，dsh 服务本身不受影响。"
+        alert.addButton(withTitle: "立即重建")
+        alert.addButton(withTitle: "稍后")
+        alert.beginSheetModal(for: win) { [weak self] resp in
+            if resp == .alertFirstButtonReturn {
+                self?.recreateWebView(
+                    logReason: "用户确认重建（哨兵 \(gb) GB）",
+                    loadingText: "页面内存偏高，正在重建释放…")
+            }
+        }
+    }
+
+    /// 内存哨兵 / 进程终止恢复：销毁当前 WebView（含其 WebContent 进程），
+    /// 重建并加载当前 token。登录态不受影响：dataStore 仍是 persistent
+    /// `.default()`（cookie 共享），加载的仍是 service 解析的 token URL（红线）。
+    private func recreateWebView(logReason: String, loadingText: String) {
+        guard service.state == .running else {
+            NSLog("[DshDock] 页面重建跳过（服务不在 running）：%@", logReason)
+            return
+        }
+        guard let win = window, let content = win.contentView else { return }
+        NSLog("[DshDock] 重建 WebView：%@", logReason)
+        memMonitor?.recordAutoAction()
+        showLoading(loadingText)
+        // 旧配置随 WebView 一起丢：先摘 handler（约束随 removeFromSuperview 自动解除）。
+        let oldUCC = webView.configuration.userContentController
+        oldUCC.removeScriptMessageHandler(forName: "dshDockRestart")
+        oldUCC.removeScriptMessageHandler(forName: NotifyBridge.messageName)
+        webTopConstraint.isActive = false
+        webView.navigationDelegate = nil
+        webView.uiDelegate = nil
+        webView.stopLoading()
+        webView.removeFromSuperview()
+        webView = makeWebView()
+        // loading/状态页在上层：新 WebView 插到最下，保持原 z 序。
+        content.addSubview(webView, positioned: .below, relativeTo: loadingView)
+        webTopConstraint = webView.topAnchor.constraint(equalTo: content.topAnchor)
+        webTopConstraint.isActive = true
+        NSLayoutConstraint.activate([
+            webView.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            webView.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            webView.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+        ])
+        win.layoutIfNeeded()
+        webTopConstraint.constant = Self.titlebarHeight(of: win)
+        NotifyBridge.shared.attach(webView: webView)
+        applyRestartHookScript()
+        setRestartingUI(false)
+        hideOverlays()
+        loadServiceURL()
+        startMemoryWatchdog()
+    }
+
     func terminateServiceForQuit() {
         bootTask?.cancel()
+        memMonitor?.stop()
         service.terminateForQuit()
     }
 
@@ -571,6 +715,19 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, WKNaviga
     private static func queryToken(of url: URL) -> String? {
         URLComponents(url: url, resolvingAgainstBaseURL: false)?
             .queryItems?.first { $0.name == "token" }?.value
+    }
+
+    /// WebContent 进程被系统回收（内存压力下的最后手段）：不白页，给恢复页。
+    /// 重试不重启 dsh 服务（服务还活着），只重建页面并加载当前 token。
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        NSLog("[DshDock] WebContent 进程终止（可能被系统回收），转恢复页")
+        contentTerminated = true
+        showStatus(
+            title: "页面进程已退出",
+            detail: "系统回收了页面进程以释放内存，dsh 服务本身还在。点“重新加载”恢复页面。",
+            logTail: service.log.tail(40),
+            retryTitle: "重新加载"
+        )
     }
 
     /// 注入 WebView 的 fetch 钩子：拦截 dsh-market 的一键重启（客户端用 fetch POST

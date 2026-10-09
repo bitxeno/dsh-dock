@@ -202,6 +202,18 @@
   BroadcastChannel 退 `serviceWorker message` 监听，再退 `onclick`。点正文且
   `focus !== false` 时原生 `NSApp.activate` 抬窗，点按钮不抬（插件语义：裁决不该
   把窗口拽上来）。
+- **点通知切回对应会话（普通通知的 sessionId 只活在 onclick 闭包里）**：插件的
+  「回复完成 / 提问 / 方案待确认」走 `new Notification()`，**通知选项里没有
+  sessionId**——它只被 `n.onclick = () => focusSession(sessionId)` 的闭包捕获；
+  只有带按钮的审批通知走 `showNotification({data:{key,sessionId}})` 才把 id 交给
+  原生。所以原生回灌 sessionId 为空，广播到插件后 `focusSession(null)` 只抬窗、
+  切不回会话（审批通知则正常，因为 key+sessionId 都在 data 里）。修法：原生
+  `dispatchToPage` 额外回灌 `id`/`tag`，shim `_dispatch` 在「无 action、无 key、
+  `navigate !== false`」时先按 `id`（退化按 `tag` 取最新一条）找回该记录、直接调
+  它自己的 `onclick`（闭包里就有 sessionId，顺带完成 `close`），命中即不再广播。
+  带 key 的审批记录仍走广播裁决，不在这里代劳；`autoFocus` 关掉时插件不挂
+  `onclick`，自然落回广播（抬窗）路径。shim 另加 `byId` 索引支撑精确命中（同 tag
+  因 `renotify` 可能有新旧多条）。刘海与系统两个后端共用这条回灌链路，行为一致。
 - **权限真实性（拉模式，别改回推模式）**：`Notification.permission` 反映 macOS 真实
   授权。shim 在**每次文档启动**主动 `postMessage({op:"query"})` 向原生要状态，原生
   查完 `_setPermission()` 回灌。不能只靠原生单向推送：`attach()` 时 WebView 还没加载
@@ -252,6 +264,25 @@
   仍显式 frame、总高 ≤28pt。铃铛按钮弹 `NotifySettingsViewController`
   （`notch/system` 二选 radio + 说明，transient，点外关闭），`onChange` 即写
   `AppPreferences.notifyBackend` 并调 `NotifyBridge.backendDidChange()`。
+
+## 9-C. 页面内存哨兵（`WebContentMonitor`）
+
+- 背景：12G 级 footprint 是十几小时堆出来的（基线 ~1G、无害峰值 2.9G），
+  30s 轮询有上千次动手窗口——之前缺的是值班人，不是反应速度。
+- 读数：WebContent 是独立 XPC 进程，App 自身 `task_info` 看不见；
+  私有 `_webProcessIdentifier`（best-effort，拿不到就只观察不动手）取 PID ＋
+  libproc `proc_pid_rusage(RUSAGE_INFO_V4).ri_phys_footprint`
+  （与 `footprint(1)` 同口径）。不靠进程名猜归因（机器上可能有模拟器等别的 WebContent）。
+- 阈值（`WebContentMonitor` 顶部常量）：warn 4G（可见时弹一次）、act 5G
+  （隐藏时自动重建、可见时弹）、回落 1.5G 解除、动手后 10min 冷却
+  （冷却内再超标转人工，不循环重建）；同一轮每种事件只发一次。
+- 重建 = 销毁 WebView（页面关闭放掉 DOM/JS；本 App 的 WebProcessCache 是禁用的，
+  闲置老进程会退出）＋ persistent dataStore（登录态保留）＋ 当前 token URL；
+  不显式新建 `WKProcessPool`（macOS 12+ 多实例已无效果）；红灯隐藏时自动做，
+  用户看着时只弹 `NSAlert`（"立即重建/稍后"），绝不在生成中掀桌子。
+- 进程被系统回收走 `webViewWebContentProcessDidTerminate` 进恢复页，
+  重试只重建页面、不重启 dsh 服务（服务还活着）。
+- 整机压力兜底刻意不做（需求排除）。
 
 ## 10. 窗口与生命周期
 
