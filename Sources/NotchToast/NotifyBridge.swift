@@ -287,6 +287,10 @@ final class NotifyBridge: NSObject, WKScriptMessageHandler, UNUserNotificationCe
         let payload: [String: Any] = [
             "action": action,
             "key": (info["key"] as? String) ?? "",
+            // 普通通知（无按钮）不带 key，插件把 sessionId 只留在自己的 onclick 闭包里，
+            // 原生拿不到——回灌 id/tag 让 shim 能找回那条记录并调它自己的 onclick。
+            "id": (info["id"] as? String) ?? "",
+            "tag": (info["tag"] as? String) ?? "",
             "sessionId": (info["sessionId"] as? String) ?? "",
             "navigate": navigate,
         ]
@@ -320,6 +324,7 @@ final class NotifyBridge: NSObject, WKScriptMessageHandler, UNUserNotificationCe
       var state = { perm: cached, waiters: [] };
       var byTag = Object.create(null);
       var byKey = Object.create(null);
+      var byId = Object.create(null);
       var swListeners = [];
       var channel = null;
 
@@ -341,6 +346,7 @@ final class NotifyBridge: NSObject, WKScriptMessageHandler, UNUserNotificationCe
       function index(rec) {
         (byTag[rec.tag] = byTag[rec.tag] || []).push(rec);
         if (rec.key) (byKey[rec.key] = byKey[rec.key] || []).push(rec);
+        byId[rec.id] = rec;
       }
       function unindex(rec) {
         function drop(map, k) {
@@ -352,6 +358,7 @@ final class NotifyBridge: NSObject, WKScriptMessageHandler, UNUserNotificationCe
         }
         drop(byTag, rec.tag);
         if (rec.key) drop(byKey, rec.key);
+        delete byId[rec.id];
       }
       function show(rec) {
         index(rec);
@@ -483,14 +490,37 @@ final class NotifyBridge: NSObject, WKScriptMessageHandler, UNUserNotificationCe
         // 原生点击/按钮回灌：优先走 BroadcastChannel，插件自己挂的监听会完成
         // 裁决（decidePending）与切会话（focusSession）；没有 BroadcastChannel
         // 时退到插件注册的 serviceworker message 监听，两条路都不通再调 onclick。
+        //
+        // 例外——普通通知（无按钮、无 key）的 sessionId 只被插件留在自己的
+        // `n.onclick` 闭包里，没进通知 data，原生回灌拿不到；若照常广播，插件
+        // 收到 sessionId=null 只会抬窗、切不回会话。所以这里按 id（退化 tag）
+        // 找回那条记录、调它自己的 onclick（闭包里的 focusSession 完成切会话 +
+        // close），命中即不再广播。autoFocus 关掉时插件不挂 onclick，自然落回
+        // 广播路径（插件侧 `config.autoFocus` 也拦着，语义不变）。
         _dispatch: function (msg) {
           msg = msg || {};
+          var action = msg.action || "";
           var key = msg.key || null;
+          var tag = msg.tag || null;
           var navigate = msg.navigate !== false;
+          if (!action && navigate && !key) {
+            // 优先按 id 精确命中（同 tag 可能因 renotify 有新旧多条）；退化到 tag 时
+            // 取最后一条（最新）记录。
+            var hit = msg.id ? byId[msg.id] : null;
+            if (!hit && tag) {
+              var tagged = byTag[tag] || [];
+              hit = tagged.length ? tagged[tagged.length - 1] : null;
+            }
+            // 带 key 的记录是审批：它的点击走广播裁决，别在这里代劳。
+            if (hit && !hit.key && typeof hit.onclick === "function") {
+              try { hit.onclick({ target: hit }); } catch (e) {}
+              return true;
+            }
+          }
           var payload = {
             source: SOURCE,
             type: "notification",
-            action: msg.action || "",
+            action: action,
             key: key,
             sessionId: msg.sessionId || null,
             navigate: navigate
