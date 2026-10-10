@@ -95,6 +95,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, WKNaviga
         wv.navigationDelegate = self
         wv.uiDelegate = self
         wv.translatesAutoresizingMaskIntoConstraints = false
+        #if DEBUG
+        // 内存尸检口：Debug 包允许 Safari → Develop Attach 到本页面，
+        // 看 JS heap 快照/DOM 计数。Release 包保持关闭（本地可 Attach 也有袭击面）。
+        wv.isInspectable = true
+        #endif
         // 插件重启接管：钩子按偏好注入（默认开），消息名 dshDockRestart → didTapRestart。
         wkConfig.userContentController.add(self, name: "dshDockRestart")
         // 系统通知桥：WKWebView 没有 Notification / Service Worker，插件（dsh-notify-me）

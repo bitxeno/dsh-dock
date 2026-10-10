@@ -88,3 +88,7 @@ Most people can leave everything as-is.
 - Building requires Xcode 26 + `xcodegen`: `xcodegen generate`, then build with `xcodebuild -project DshDock.xcodeproj -scheme DshDock -configuration Debug build`.
 - The app runs `<binary> [web | --profile <name>] --no-open --port <port> <extra>` under the hood — putting `--profile <name>` in Extra Args replaces the default `web`; settings are stored in `UserDefaults` (`dsh.binaryPath` / `dsh.extraArgs` / `dsh.port` / `dsh.dshHome`, plus app-level `app.interceptPluginRestart` / `app.notifyBackend` default `notch`).
 - Design details (in Chinese): `docs/DESIGN.md`
+
+### Web debugging
+
+Debug builds enable Safari Web Inspector for the page (`isInspectable`, Debug only — Release builds stay closed). Quit the Release app first (same bundle ID, single instance), open the Debug build, then Safari → Settings → Advanced → turn on "Show features for web developers" → Develop menu → your Mac → the DshDock page. Handy for heap snapshots / DOM counters when diagnosing page memory growth.

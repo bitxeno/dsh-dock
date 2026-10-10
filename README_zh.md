@@ -88,3 +88,7 @@ brew install --cask bitxeno/tap/dshdock
 - 构建需要 Xcode 26 + `xcodegen`：`xcodegen generate`，再 `xcodebuild -project DshDock.xcodeproj -scheme DshDock -configuration Debug build`。
 - 底层实际执行的是 `<binary> [web | --profile <名称>] --no-open --port <port> <extra>`——Extra Args 里填 `--profile <名称>` 会替换默认的 `web`；设置存在 `UserDefaults`（`dsh.binaryPath` / `dsh.extraArgs` / `dsh.port` / `dsh.dshHome`，另有应用级 `app.interceptPluginRestart` / `app.notifyBackend` 默认 `notch`）。
 - 详细设计：`docs/DESIGN.md`
+
+### 网页调试
+
+Debug 包允许用 Safari 网页检查器连页面（`isInspectable`，仅 Debug 开启，Release 保持关闭）。先退出 Release 版（同 bundle ID 单实例），打开 Debug 版，再 Safari → 设置 → 高级 → 勾选"显示网页开发者功能" → Develop 菜单 → 你的 Mac → DshDock 页面。查页面内存增长时可看堆快照 / DOM 计数。
